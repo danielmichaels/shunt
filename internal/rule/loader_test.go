@@ -1638,6 +1638,176 @@ func TestRealWorldScenario_BatchNotifications(t *testing.T) {
 	}
 }
 
+// ========================================
+// ParseYAML / KV LOADING TESTS
+// ========================================
+
+func TestParseYAML_ValidRules(t *testing.T) {
+	yamlData := []byte(`
+- trigger:
+    nats:
+      subject: "sensors.tank.>"
+  conditions:
+    operator: and
+    items:
+      - field: "{level_percent}"
+        operator: gte
+        value: 85
+  action:
+    nats:
+      subject: "commands.valve.{tank_id}.open"
+      payload: '{"command": "open_overflow"}'
+
+- trigger:
+    nats:
+      subject: "sensors.tank.>"
+  conditions:
+    operator: and
+    items:
+      - field: "{level_percent}"
+        operator: gte
+        value: 95
+  action:
+    nats:
+      subject: "alerts.critical.tank.{tank_id}"
+      payload: '{"alert": "CRITICAL"}'
+`)
+
+	rules, err := ParseYAML(yamlData)
+	if err != nil {
+		t.Fatalf("ParseYAML() unexpected error: %v", err)
+	}
+	if len(rules) != 2 {
+		t.Fatalf("Expected 2 rules, got %d", len(rules))
+	}
+	if rules[0].Trigger.NATS == nil {
+		t.Fatal("Expected NATS trigger on first rule")
+	}
+	if rules[0].Trigger.NATS.Subject != "sensors.tank.>" {
+		t.Errorf("Unexpected trigger subject: %s", rules[0].Trigger.NATS.Subject)
+	}
+	if rules[0].Action.NATS.Subject != "commands.valve.{tank_id}.open" {
+		t.Errorf("Unexpected action subject: %s", rules[0].Action.NATS.Subject)
+	}
+}
+
+func TestParseYAML_InvalidYAML(t *testing.T) {
+	_, err := ParseYAML([]byte(`this: is: completely: invalid: yaml [`))
+	if err == nil {
+		t.Fatal("Expected error for invalid YAML, got nil")
+	}
+}
+
+func TestParseYAML_EmptyInput(t *testing.T) {
+	rules, err := ParseYAML([]byte(""))
+	if err != nil {
+		t.Fatalf("ParseYAML() unexpected error for empty input: %v", err)
+	}
+	if len(rules) != 0 {
+		t.Errorf("Expected 0 rules for empty input, got %d", len(rules))
+	}
+}
+
+func TestParseYAML_SingleRule(t *testing.T) {
+	yamlData := []byte(`
+- trigger:
+    nats:
+      subject: "system.errors"
+  action:
+    nats:
+      subject: "alerts.errors"
+      passthrough: true
+`)
+
+	rules, err := ParseYAML(yamlData)
+	if err != nil {
+		t.Fatalf("ParseYAML() unexpected error: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("Expected 1 rule, got %d", len(rules))
+	}
+	if !rules[0].Action.NATS.Passthrough {
+		t.Error("Expected passthrough to be true")
+	}
+}
+
+func TestValidateRule_Public(t *testing.T) {
+	loader := newTestLoader()
+
+	t.Run("valid rule", func(t *testing.T) {
+		rule := &Rule{
+			Trigger: Trigger{
+				NATS: &NATSTrigger{Subject: "sensors.temp"},
+			},
+			Conditions: &Conditions{
+				Operator: "and",
+				Items: []Condition{
+					{Field: "{temperature}", Operator: "gt", Value: 30},
+				},
+			},
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "alerts.temp",
+					Payload: `{"alert": "high_temp"}`,
+				},
+			},
+		}
+		if err := loader.ValidateRule(rule); err != nil {
+			t.Errorf("ValidateRule() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("missing trigger", func(t *testing.T) {
+		rule := &Rule{
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "output",
+					Payload: "{}",
+				},
+			},
+		}
+		err := loader.ValidateRule(rule)
+		if err == nil {
+			t.Fatal("Expected error for missing trigger, got nil")
+		}
+		if !strings.Contains(err.Error(), "rule must have either a NATS or HTTP trigger") {
+			t.Errorf("Unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("missing action", func(t *testing.T) {
+		rule := &Rule{
+			Trigger: Trigger{
+				NATS: &NATSTrigger{Subject: "sensors.temp"},
+			},
+		}
+		err := loader.ValidateRule(rule)
+		if err == nil {
+			t.Fatal("Expected error for missing action, got nil")
+		}
+	})
+}
+
+func TestExpandEnvironmentVariables_Public(t *testing.T) {
+	loader := newTestLoader()
+	t.Setenv("TEST_ACTION_SUBJECT", "alerts.critical")
+
+	rule := &Rule{
+		Action: Action{
+			NATS: &NATSAction{
+				Subject: "${TEST_ACTION_SUBJECT}",
+				Payload: `{"alert": "test"}`,
+			},
+		},
+	}
+
+	loader.ExpandEnvironmentVariables(rule)
+
+	if rule.Action.NATS.Subject != "alerts.critical" {
+		t.Errorf("Expected expanded subject 'alerts.critical', got '%s'", rule.Action.NATS.Subject)
+	}
+}
+
 // TestOperatorWhitelist_IncludesArrayOperators verifies array operators are in whitelist
 func TestOperatorWhitelist_IncludesArrayOperators(t *testing.T) {
 	loader := newTestLoader()

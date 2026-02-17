@@ -300,6 +300,31 @@ func (l *RulesLoader) expandEnvVarsInString(input, location, filePath string, ru
 	return expanded
 }
 
+// ParseYAML parses a YAML byte slice into a slice of rules.
+// Used by RuleKVManager to parse KV values. The format is identical
+// to file-based rules (trigger + conditions + action).
+func ParseYAML(data []byte) ([]Rule, error) {
+	var rules []Rule
+	if err := yaml.Unmarshal(data, &rules); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+	return rules, nil
+}
+
+// ExpandEnvironmentVariables expands ${VAR_NAME} placeholders in a rule.
+// Public wrapper for KV-loaded rules that need env var expansion outside
+// the file-based loading path.
+func (l *RulesLoader) ExpandEnvironmentVariables(rule *Rule) {
+	l.expandEnvironmentVariables(rule, "kv", 0)
+}
+
+// ValidateRule validates a single rule (trigger + conditions + action).
+// Public wrapper for KV-loaded rules that need validation outside
+// the file-based loading path.
+func (l *RulesLoader) ValidateRule(rule *Rule) error {
+	return l.validateRule(rule, "kv", 0)
+}
+
 // validateRule validates a complete rule with new trigger/action format
 func (l *RulesLoader) validateRule(rule *Rule, filePath string, ruleIndex int) error {
 	if err := l.validateTrigger(&rule.Trigger, filePath, ruleIndex); err != nil {

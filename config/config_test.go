@@ -113,6 +113,22 @@ func TestSetDefaults(t *testing.T) {
 				if cfg.ForEach.MaxIterations != 100 {
 					t.Errorf("ForEach.MaxIterations = %d, want 100", cfg.ForEach.MaxIterations)
 				}
+
+				// Rules defaults
+				if cfg.Rules.KVBucket != "rules" {
+					t.Errorf("Rules.KVBucket = %s, want rules", cfg.Rules.KVBucket)
+				}
+			},
+		},
+		{
+			name: "custom rules kvBucket preserved",
+			initial: Config{
+				Rules: RulesConfig{KVBucket: "my-rules"},
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.Rules.KVBucket != "my-rules" {
+					t.Errorf("Rules.KVBucket = %s, want my-rules", cfg.Rules.KVBucket)
+				}
 			},
 		},
 		{

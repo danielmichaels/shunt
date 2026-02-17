@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielmichaels/rule-engine/config"
 	"github.com/danielmichaels/rule-engine/internal/app"
+	"github.com/danielmichaels/rule-engine/internal/broker"
 	"github.com/danielmichaels/rule-engine/internal/lifecycle"
 	"github.com/danielmichaels/rule-engine/internal/logger"
 	flag "github.com/spf13/pflag" // Use pflag aliased as flag
@@ -33,23 +34,31 @@ func run() error {
 
 	// Create app factory function
 	createApp := func() (lifecycle.Application, error) {
-		// Build the common components using the new builder.
 		baseApp, err := app.NewAppBuilder(cfg, rulesPath).
 			WithLogger().
 			WithMetrics().
 			WithNATSBroker().
-			WithRuleProcessor().
+			WithKVRuleProcessor().
 			Build()
 		if err != nil {
 			return nil, err
 		}
 
-		// Create the specific application with the common base.
-		return app.NewRouterApp(baseApp, cfg)
+		routerApp := app.NewKVRouterApp(baseApp, cfg)
+
+		kvManager := broker.NewRuleKVManager(
+			cfg.Rules.KVBucket,
+			baseApp.Processor,
+			baseApp.Broker,
+			baseApp.RulesLoader,
+			baseApp.Logger,
+		)
+		routerApp.SetRuleKVManager(kvManager)
+
+		return routerApp, nil
 	}
 
-	// Run with reload support (handles SIGHUP automatically)
-	return lifecycle.RunWithReload(createApp, appLogger)
+	return lifecycle.Run(createApp, appLogger)
 }
 
 // parseFlags parses command line arguments and loads config via Viper

@@ -23,6 +23,7 @@ type Processor struct {
 	index           *RuleIndex
 	allRules        []*Rule
 	httpPathIndex   map[string][]*Rule
+	kvRules         atomic.Value // holds map[string][]*Rule (subscription subject → rules)
 	timeProvider    TimeProvider
 	kvContext       *KVContext
 	logger          *logger.Logger
@@ -835,6 +836,66 @@ func safeMarshal(v interface{}) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal value: %w", err)
 	}
 	return b, nil
+}
+
+// ReplaceRules atomically swaps the KV-loaded rule set.
+// Called by RuleKVManager when KV Watch detects changes.
+// The map is keyed by trigger subject (e.g., "sensors.tank.>").
+func (p *Processor) ReplaceRules(rules map[string][]*Rule) {
+	p.kvRules.Store(rules)
+
+	total := 0
+	for _, rs := range rules {
+		total += len(rs)
+	}
+	p.logger.Info("KV rules replaced",
+		"subjects", len(rules),
+		"totalRules", total)
+
+	if p.metrics != nil {
+		p.metrics.SetRulesActive(float64(total))
+	}
+}
+
+// ProcessForSubscription processes a message using O(1) lookup by trigger subject.
+// triggerSubject is the trigger pattern (e.g., "sensors.tank.>") used for rule lookup.
+// messageSubject is the actual message subject (e.g., "sensors.tank.001") used for template variables.
+// Falls back to ProcessNATS (pattern matching) if no KV rules are loaded.
+func (p *Processor) ProcessForSubscription(triggerSubject, messageSubject string, payload []byte, headers map[string]string) ([]*Action, error) {
+	ruleMap, _ := p.kvRules.Load().(map[string][]*Rule)
+	if ruleMap == nil {
+		return p.ProcessNATS(messageSubject, payload, headers)
+	}
+
+	rules := ruleMap[triggerSubject]
+	if len(rules) == 0 {
+		return p.ProcessNATS(messageSubject, payload, headers)
+	}
+
+	p.logger.Debug("processing via KV rules",
+		"triggerSubject", triggerSubject,
+		"messageSubject", messageSubject,
+		"ruleCount", len(rules))
+
+	context, err := NewEvaluationContext(
+		payload,
+		headers,
+		NewSubjectContext(messageSubject),
+		nil,
+		p.timeProvider.GetCurrentContext(),
+		p.kvContext,
+		p.sigVerification,
+		p.logger,
+	)
+	if err != nil {
+		atomic.AddUint64(&p.stats.Errors, 1)
+		if p.metrics != nil {
+			p.metrics.IncMessagesTotal("error")
+		}
+		return nil, err
+	}
+
+	return p.evaluateRules(rules, context, "nats")
 }
 
 // ProcessWithSubject is kept for backward compatibility.

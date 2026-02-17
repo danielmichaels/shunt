@@ -148,8 +148,13 @@ type Config struct {
 	Logging  LogConfig      `json:"logging" yaml:"logging" mapstructure:"logging"`
 	Metrics  MetricsConfig  `json:"metrics" yaml:"metrics" mapstructure:"metrics"`
 	KV       KVConfig       `json:"kv" yaml:"kv" mapstructure:"kv"`
+	Rules    RulesConfig    `json:"rules" yaml:"rules" mapstructure:"rules"`
 	Security SecurityConfig `json:"security" yaml:"security" mapstructure:"security"`
 	ForEach  ForEachConfig  `json:"forEach" yaml:"forEach" mapstructure:"forEach"`
+}
+
+type RulesConfig struct {
+	KVBucket string `json:"kvBucket" yaml:"kvBucket" mapstructure:"kvBucket"`
 }
 
 // ForEachConfig contains configuration for array iteration operations
@@ -455,6 +460,11 @@ func setDefaults(cfg *Config) {
 	// KV defaults
 	if cfg.KV.Enabled {
 		cfg.KV.LocalCache.Enabled = true
+	}
+
+	// Rules defaults
+	if cfg.Rules.KVBucket == "" {
+		cfg.Rules.KVBucket = "rules"
 	}
 
 	// Security defaults

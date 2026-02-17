@@ -260,6 +260,45 @@ func (b *NATSBroker) AddSubscription(subject string) error {
 	return nil
 }
 
+// AddAndStartSubscription creates a consumer for the subject (if needed)
+// and immediately starts the subscription with workers. Used by RuleKVManager
+// for runtime subscription management.
+func (b *NATSBroker) AddAndStartSubscription(subject string) error {
+	if b.subscriptionMgr == nil {
+		return fmt.Errorf("subscription manager not initialized")
+	}
+
+	if err := b.CreateConsumerForSubject(subject); err != nil {
+		return fmt.Errorf("failed to create consumer for '%s': %w", subject, err)
+	}
+
+	consumerName, exists := b.consumers[subject]
+	if !exists {
+		return fmt.Errorf("consumer not found after creation for subject '%s'", subject)
+	}
+
+	streamName, err := b.streamResolver.FindStreamForSubject(subject)
+	if err != nil {
+		return fmt.Errorf("cannot find stream for subject '%s': %w", subject, err)
+	}
+
+	workers := b.config.NATS.Consumers.WorkerCount
+	return b.subscriptionMgr.AddAndStartSubscription(b.ctx, streamName, consumerName, subject, workers)
+}
+
+// RemoveSubscription stops and removes the subscription for a subject.
+// Optionally deletes the durable consumer from the stream.
+func (b *NATSBroker) RemoveSubscription(subject string) {
+	if b.subscriptionMgr == nil {
+		return
+	}
+
+	b.subscriptionMgr.RemoveSubscription(subject)
+	delete(b.consumers, subject)
+
+	b.logger.Info("subscription and consumer tracking removed", "subject", subject)
+}
+
 // generateConsumerName creates a valid NATS consumer name from a subject
 func (b *NATSBroker) generateConsumerName(subject string) string {
 	sanitized := subject

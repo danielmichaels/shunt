@@ -1495,3 +1495,166 @@ func BenchmarkExtractVariable(b *testing.B) {
 		ExtractVariable(testCases[i%len(testCases)])
 	}
 }
+
+// ========================================
+// ReplaceRules + ProcessForSubscription TESTS
+// ========================================
+
+func TestReplaceRules_And_ProcessForSubscription(t *testing.T) {
+	p := newTestProcessor()
+
+	rules := map[string][]*Rule{
+		"sensors.tank.>": {
+			{
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.tank.>"}},
+				Conditions: &Conditions{
+					Operator: "and",
+					Items: []Condition{
+						{Field: "{level}", Operator: "gte", Value: float64(85)},
+					},
+				},
+				Action: Action{
+					NATS: &NATSAction{
+						Subject: "alerts.tank",
+						Payload: `{"level": "{level}"}`,
+					},
+				},
+			},
+		},
+	}
+
+	p.ReplaceRules(rules)
+
+	payload := []byte(`{"level": 90}`)
+	actions, err := p.ProcessForSubscription("sensors.tank.>", "sensors.tank.001", payload, nil)
+	if err != nil {
+		t.Fatalf("ProcessForSubscription() unexpected error: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("Expected 1 action, got %d", len(actions))
+	}
+	if actions[0].NATS.Subject != "alerts.tank" {
+		t.Errorf("Unexpected action subject: %s", actions[0].NATS.Subject)
+	}
+}
+
+func TestProcessForSubscription_SubjectContext(t *testing.T) {
+	p := newTestProcessor()
+
+	rules := map[string][]*Rule{
+		"sensors.tank.>": {
+			{
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.tank.>"}},
+				Action: Action{
+					NATS: &NATSAction{
+						Subject: "alerts.{@subject.2}",
+						Payload: `{"source": "{@subject}"}`,
+					},
+				},
+			},
+		},
+	}
+
+	p.ReplaceRules(rules)
+
+	// triggerSubject is "sensors.tank.>" but messageSubject is "sensors.tank.overflow-1"
+	// Template variables should resolve from messageSubject
+	actions, err := p.ProcessForSubscription("sensors.tank.>", "sensors.tank.overflow-1", []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("ProcessForSubscription() unexpected error: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("Expected 1 action, got %d", len(actions))
+	}
+	if actions[0].NATS.Subject != "alerts.overflow-1" {
+		t.Errorf("Expected subject template resolved from messageSubject, got: %s", actions[0].NATS.Subject)
+	}
+	if !strings.Contains(actions[0].NATS.Payload, "sensors.tank.overflow-1") {
+		t.Errorf("Expected payload to contain full messageSubject, got: %s", actions[0].NATS.Payload)
+	}
+}
+
+func TestProcessForSubscription_NoRules(t *testing.T) {
+	p := newTestProcessor()
+
+	p.ReplaceRules(map[string][]*Rule{
+		"sensors.tank.>": {
+			{
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.tank.>"}},
+				Action: Action{
+					NATS: &NATSAction{Subject: "out", Payload: "{}"},
+				},
+			},
+		},
+	})
+
+	// No rules for this trigger subject — falls back to ProcessNATS
+	actions, err := p.ProcessForSubscription("sensors.motion.>", "sensors.motion.1", []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("ProcessForSubscription() unexpected error: %v", err)
+	}
+	if len(actions) != 0 {
+		t.Errorf("Expected 0 actions for unmatched trigger, got %d", len(actions))
+	}
+}
+
+func TestProcessForSubscription_FallbackWhenNoKVRules(t *testing.T) {
+	p := newTestProcessor()
+
+	// Load rules via file-based path (RuleIndex)
+	p.LoadRules([]Rule{
+		{
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.temp"}},
+			Action: Action{
+				NATS: &NATSAction{Subject: "alerts.temp", Payload: "{}"},
+			},
+		},
+	})
+
+	// No ReplaceRules called — kvRules is nil, should fall back to ProcessNATS
+	actions, err := p.ProcessForSubscription("sensors.temp", "sensors.temp", []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("ProcessForSubscription() unexpected error: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Errorf("Expected 1 action from fallback to ProcessNATS, got %d", len(actions))
+	}
+}
+
+func TestReplaceRules_AtomicSwap(t *testing.T) {
+	p := newTestProcessor()
+
+	// Load initial rules
+	p.ReplaceRules(map[string][]*Rule{
+		"sensors.tank.>": {
+			{
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.tank.>"}},
+				Action: Action{
+					NATS: &NATSAction{Subject: "v1.output", Payload: "{}"},
+				},
+			},
+		},
+	})
+
+	actions, _ := p.ProcessForSubscription("sensors.tank.>", "sensors.tank.001", []byte(`{}`), nil)
+	if len(actions) != 1 || actions[0].NATS.Subject != "v1.output" {
+		t.Fatal("Expected v1 rules")
+	}
+
+	// Swap to v2
+	p.ReplaceRules(map[string][]*Rule{
+		"sensors.tank.>": {
+			{
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.tank.>"}},
+				Action: Action{
+					NATS: &NATSAction{Subject: "v2.output", Payload: "{}"},
+				},
+			},
+		},
+	})
+
+	actions, _ = p.ProcessForSubscription("sensors.tank.>", "sensors.tank.001", []byte(`{}`), nil)
+	if len(actions) != 1 || actions[0].NATS.Subject != "v2.output" {
+		t.Fatal("Expected v2 rules after atomic swap")
+	}
+}
