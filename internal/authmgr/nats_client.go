@@ -31,6 +31,7 @@ type NATSClient struct {
 	kv     jetstream.KeyValue
 	logger *logger.Logger
 	config *NATSConfig
+	shared bool
 }
 
 // NewNATSClient creates a NATS client and opens KV bucket
@@ -85,6 +86,37 @@ func NewNATSClient(cfg *NATSConfig, storageConfig *StorageConfig, log *logger.Lo
 	}, nil
 }
 
+// NewNATSClientFromConn creates a NATSClient that reuses an existing NATS connection.
+// Used when the auth-manager runs as a subsystem of rule-router.
+func NewNATSClientFromConn(nc *nats.Conn, storageConfig *StorageConfig, log *logger.Logger) (*NATSClient, error) {
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JetStream: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), natsKVOperationTimeout)
+	defer cancel()
+
+	kv, err := js.KeyValue(ctx, storageConfig.Bucket)
+	if err != nil {
+		if err == jetstream.ErrBucketNotFound {
+			return nil, fmt.Errorf("KV bucket '%s' not found. Create it with: nats kv add %s",
+				storageConfig.Bucket, storageConfig.Bucket)
+		}
+		return nil, fmt.Errorf("failed to open KV bucket '%s': %w", storageConfig.Bucket, err)
+	}
+
+	log.Info("KV bucket opened successfully (shared connection)", "bucket", storageConfig.Bucket)
+
+	return &NATSClient{
+		conn:   nc,
+		js:     js,
+		kv:     kv,
+		logger: log,
+		shared: true,
+	}, nil
+}
+
 // StoreToken writes a token to the KV bucket
 func (c *NATSClient) StoreToken(ctx context.Context, key, token string) error {
 	c.logger.Debug("storing token in KV", "key", key)
@@ -98,8 +130,14 @@ func (c *NATSClient) StoreToken(ctx context.Context, key, token string) error {
 	return nil
 }
 
-// Close gracefully closes the NATS connection
+// Close gracefully closes the NATS connection.
+// When using a shared connection, it skips draining since the owner manages the connection.
 func (c *NATSClient) Close() error {
+	if c.shared {
+		c.logger.Info("auth-manager NATS client closed (shared connection, skipping drain)")
+		return nil
+	}
+
 	c.logger.Info("closing NATS connection")
 
 	if err := c.conn.Drain(); err != nil {

@@ -10,10 +10,10 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "rule-cli",
-	Short: "A CLI for creating, testing, and managing rules for the rule-router and http-gateway.",
-	Long: `rule-cli is a comprehensive command-line tool that helps you build, validate,
-and test your rule files in an offline environment. It supports the full rule
-syntax, including NATS/HTTP triggers, array operations, and dependency mocking.`,
+	Short: "CLI for creating, testing, and managing rules for rule-router",
+	Long: `rule-cli is a command-line tool for building, validating, testing, and managing
+rules. It supports offline rule evaluation and NATS KV bucket management for
+pushing, pulling, listing, and deleting rules in a live cluster.`,
 	// If a subcommand is not provided, default to showing help.
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()

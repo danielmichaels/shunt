@@ -141,16 +141,55 @@ const (
 	DefaultSignatureHeader = "Nats-Signature"
 )
 
-// Config represents the unified configuration for both rule-router and http-gateway
+// Config represents the unified configuration for rule-router
 type Config struct {
-	NATS     NATSConfig     `json:"nats" yaml:"nats" mapstructure:"nats"`
-	HTTP     HTTPConfig     `json:"http,omitempty" yaml:"http,omitempty" mapstructure:"http"`
-	Logging  LogConfig      `json:"logging" yaml:"logging" mapstructure:"logging"`
-	Metrics  MetricsConfig  `json:"metrics" yaml:"metrics" mapstructure:"metrics"`
-	KV       KVConfig       `json:"kv" yaml:"kv" mapstructure:"kv"`
-	Rules    RulesConfig    `json:"rules" yaml:"rules" mapstructure:"rules"`
-	Security SecurityConfig `json:"security" yaml:"security" mapstructure:"security"`
-	ForEach  ForEachConfig  `json:"forEach" yaml:"forEach" mapstructure:"forEach"`
+	NATS        NATSConfig        `json:"nats" yaml:"nats" mapstructure:"nats"`
+	HTTP        HTTPConfig        `json:"http,omitempty" yaml:"http,omitempty" mapstructure:"http"`
+	Logging     LogConfig         `json:"logging" yaml:"logging" mapstructure:"logging"`
+	Metrics     MetricsConfig     `json:"metrics" yaml:"metrics" mapstructure:"metrics"`
+	KV          KVConfig          `json:"kv" yaml:"kv" mapstructure:"kv"`
+	Rules       RulesConfig       `json:"rules" yaml:"rules" mapstructure:"rules"`
+	Security    SecurityConfig    `json:"security" yaml:"security" mapstructure:"security"`
+	ForEach     ForEachConfig     `json:"forEach" yaml:"forEach" mapstructure:"forEach"`
+	Gateway     GatewayConfig     `json:"gateway" yaml:"gateway" mapstructure:"gateway"`
+	AuthManager AuthManagerConfig `json:"authManager" yaml:"authManager" mapstructure:"authManager"`
+}
+
+// GatewayConfig controls the optional HTTP gateway subsystem.
+// When enabled, the gateway uses the HTTP config section for server/client settings.
+type GatewayConfig struct {
+	Enabled bool `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
+}
+
+// AuthManagerConfig controls the optional authentication manager subsystem
+type AuthManagerConfig struct {
+	Enabled   bool                    `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
+	Storage   AuthManagerStorage      `json:"storage" yaml:"storage" mapstructure:"storage"`
+	Providers []AuthManagerProvider   `json:"providers" yaml:"providers" mapstructure:"providers"`
+}
+
+// AuthManagerStorage defines where to store tokens
+type AuthManagerStorage struct {
+	Bucket    string `json:"bucket" yaml:"bucket" mapstructure:"bucket"`
+	KeyPrefix string `json:"keyPrefix" yaml:"keyPrefix" mapstructure:"keyPrefix"`
+}
+
+// AuthManagerProvider defines an authentication provider
+type AuthManagerProvider struct {
+	ID            string            `json:"id" yaml:"id" mapstructure:"id"`
+	Type          string            `json:"type" yaml:"type" mapstructure:"type"`
+	KVKey         string            `json:"kvKey" yaml:"kvKey" mapstructure:"kvKey"`
+	RefreshBefore string            `json:"refreshBefore" yaml:"refreshBefore" mapstructure:"refreshBefore"`
+	RefreshEvery  string            `json:"refreshEvery" yaml:"refreshEvery" mapstructure:"refreshEvery"`
+	TokenURL      string            `json:"tokenUrl" yaml:"tokenUrl" mapstructure:"tokenUrl"`
+	ClientID      string            `json:"clientId" yaml:"clientId" mapstructure:"clientId"`
+	ClientSecret  string            `json:"clientSecret" yaml:"clientSecret" mapstructure:"clientSecret"`
+	Scopes        []string          `json:"scopes" yaml:"scopes" mapstructure:"scopes"`
+	AuthURL       string            `json:"authUrl" yaml:"authUrl" mapstructure:"authUrl"`
+	Method        string            `json:"method" yaml:"method" mapstructure:"method"`
+	Headers       map[string]string `json:"headers" yaml:"headers" mapstructure:"headers"`
+	Body          string            `json:"body" yaml:"body" mapstructure:"body"`
+	TokenPath     string            `json:"tokenPath" yaml:"tokenPath" mapstructure:"tokenPath"`
 }
 
 type RulesConfig struct {
@@ -320,20 +359,6 @@ func Load(path string) (*Config, error) {
 	return &config, nil
 }
 
-// LoadHTTPConfig loads configuration and validates that HTTP fields are present
-func LoadHTTPConfig(path string) (*Config, error) {
-	cfg, err := Load(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate that HTTP configuration is present and valid
-	if cfg.HTTP.Server.Address == "" {
-		return nil, fmt.Errorf("HTTP server address is required for http-gateway")
-	}
-
-	return cfg, nil
-}
 
 // setDefaults applies default values to the configuration
 func setDefaults(cfg *Config) {
@@ -479,6 +504,11 @@ func setDefaults(cfg *Config) {
 	if cfg.ForEach.MaxIterations == 0 {
 		cfg.ForEach.MaxIterations = DefaultForEachMaxIterations
 	}
+
+	// AuthManager defaults
+	if cfg.AuthManager.Enabled && cfg.AuthManager.Storage.Bucket == "" {
+		cfg.AuthManager.Storage.Bucket = "tokens"
+	}
 }
 
 // validateConfig validates the configuration
@@ -616,6 +646,59 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.ForEach.MaxIterations > MaxForEachIterations {
 		return fmt.Errorf("forEach maxIterations too high (%d), maximum is %d", cfg.ForEach.MaxIterations, MaxForEachIterations)
+	}
+
+	// AuthManager validation
+	if cfg.AuthManager.Enabled {
+		if len(cfg.AuthManager.Providers) == 0 {
+			return fmt.Errorf("authManager requires at least one provider when enabled")
+		}
+		if cfg.AuthManager.Storage.Bucket == "" {
+			return fmt.Errorf("authManager storage bucket cannot be empty")
+		}
+		seenIDs := make(map[string]bool)
+		for i, p := range cfg.AuthManager.Providers {
+			if p.ID == "" {
+				return fmt.Errorf("authManager provider %d: id is required", i)
+			}
+			if seenIDs[p.ID] {
+				return fmt.Errorf("authManager provider %d: duplicate id '%s'", i, p.ID)
+			}
+			seenIDs[p.ID] = true
+			if p.Type != "oauth2" && p.Type != "custom-http" {
+				return fmt.Errorf("authManager provider %s: type must be 'oauth2' or 'custom-http'", p.ID)
+			}
+			if p.Type == "oauth2" {
+				if p.TokenURL == "" {
+					return fmt.Errorf("authManager provider %s: tokenUrl required for oauth2", p.ID)
+				}
+				if p.ClientID == "" {
+					return fmt.Errorf("authManager provider %s: clientId required for oauth2", p.ID)
+				}
+				if p.ClientSecret == "" {
+					return fmt.Errorf("authManager provider %s: clientSecret required for oauth2", p.ID)
+				}
+				if p.RefreshBefore == "" {
+					return fmt.Errorf("authManager provider %s: refreshBefore required for oauth2", p.ID)
+				}
+				if _, err := time.ParseDuration(p.RefreshBefore); err != nil {
+					return fmt.Errorf("authManager provider %s: invalid refreshBefore: %w", p.ID, err)
+				}
+			} else if p.Type == "custom-http" {
+				if p.AuthURL == "" {
+					return fmt.Errorf("authManager provider %s: authUrl required for custom-http", p.ID)
+				}
+				if p.TokenPath == "" {
+					return fmt.Errorf("authManager provider %s: tokenPath required for custom-http", p.ID)
+				}
+				if p.RefreshEvery == "" {
+					return fmt.Errorf("authManager provider %s: refreshEvery required for custom-http", p.ID)
+				}
+				if _, err := time.ParseDuration(p.RefreshEvery); err != nil {
+					return fmt.Errorf("authManager provider %s: invalid refreshEvery: %w", p.ID, err)
+				}
+			}
+		}
 	}
 
 	return nil
