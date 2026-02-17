@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 	goccyjson "github.com/goccy/go-json"
 )
 

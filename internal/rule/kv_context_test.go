@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/nats-io/nats.go/jetstream"
 )
 

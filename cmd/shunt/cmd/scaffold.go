@@ -1,9 +1,9 @@
-// file: cmd/rule-cli/cmd/scaffold.go
+// file: cmd/shunt/cmd/scaffold.go
 package cmd
 
 import (
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/tester"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/tester"
 	"github.com/spf13/cobra"
 )
 

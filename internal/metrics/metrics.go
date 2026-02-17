@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Metrics provides centralized metrics collection for both rule-router and http-gateway
+// Metrics provides centralized metrics collection for both shunt and http-gateway
 type Metrics struct {
 	registry *prometheus.Registry // Now exposed for HTTP metrics
 

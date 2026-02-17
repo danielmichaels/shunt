@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 )
 
 // TestLocalKVCache_BasicOperations tests Get, Set, Delete operations

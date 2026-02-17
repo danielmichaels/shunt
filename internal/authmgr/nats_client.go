@@ -5,11 +5,12 @@ package authmgr
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -61,18 +62,26 @@ func NewNATSClient(cfg *NATSConfig, storageConfig *StorageConfig, log *logger.Lo
 		return nil, fmt.Errorf("failed to create JetStream: %w", err)
 	}
 
-	// Open KV bucket (must exist - fail fast if not)
 	ctx, cancel := context.WithTimeout(context.Background(), natsKVOperationTimeout)
 	defer cancel()
 
 	kv, err := js.KeyValue(ctx, storageConfig.Bucket)
 	if err != nil {
-		nc.Close()
-		if err == jetstream.ErrBucketNotFound {
+		if errors.Is(err, jetstream.ErrBucketNotFound) && storageConfig.AutoProvision {
+			kv, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: storageConfig.Bucket})
+			if err != nil {
+				nc.Close()
+				return nil, fmt.Errorf("failed to auto-create KV bucket '%s': %w", storageConfig.Bucket, err)
+			}
+			log.Info("auto-provisioned KV bucket", "bucket", storageConfig.Bucket)
+		} else if errors.Is(err, jetstream.ErrBucketNotFound) {
+			nc.Close()
 			return nil, fmt.Errorf("KV bucket '%s' not found. Create it with: nats kv add %s",
 				storageConfig.Bucket, storageConfig.Bucket)
+		} else {
+			nc.Close()
+			return nil, fmt.Errorf("failed to open KV bucket '%s': %w", storageConfig.Bucket, err)
 		}
-		return nil, fmt.Errorf("failed to open KV bucket '%s': %w", storageConfig.Bucket, err)
 	}
 
 	log.Info("KV bucket opened successfully", "bucket", storageConfig.Bucket)
@@ -87,7 +96,7 @@ func NewNATSClient(cfg *NATSConfig, storageConfig *StorageConfig, log *logger.Lo
 }
 
 // NewNATSClientFromConn creates a NATSClient that reuses an existing NATS connection.
-// Used when the auth-manager runs as a subsystem of rule-router.
+// Used when the auth-manager runs as a subsystem of shunt.
 func NewNATSClientFromConn(nc *nats.Conn, storageConfig *StorageConfig, log *logger.Logger) (*NATSClient, error) {
 	js, err := jetstream.New(nc)
 	if err != nil {
@@ -99,11 +108,18 @@ func NewNATSClientFromConn(nc *nats.Conn, storageConfig *StorageConfig, log *log
 
 	kv, err := js.KeyValue(ctx, storageConfig.Bucket)
 	if err != nil {
-		if err == jetstream.ErrBucketNotFound {
+		if errors.Is(err, jetstream.ErrBucketNotFound) && storageConfig.AutoProvision {
+			kv, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: storageConfig.Bucket})
+			if err != nil {
+				return nil, fmt.Errorf("failed to auto-create KV bucket '%s': %w", storageConfig.Bucket, err)
+			}
+			log.Info("auto-provisioned KV bucket", "bucket", storageConfig.Bucket)
+		} else if errors.Is(err, jetstream.ErrBucketNotFound) {
 			return nil, fmt.Errorf("KV bucket '%s' not found. Create it with: nats kv add %s",
 				storageConfig.Bucket, storageConfig.Bucket)
+		} else {
+			return nil, fmt.Errorf("failed to open KV bucket '%s': %w", storageConfig.Bucket, err)
 		}
-		return nil, fmt.Errorf("failed to open KV bucket '%s': %w", storageConfig.Bucket, err)
 	}
 
 	log.Info("KV bucket opened successfully (shared connection)", "bucket", storageConfig.Bucket)

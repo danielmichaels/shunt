@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 	json "github.com/goccy/go-json"
 )
 

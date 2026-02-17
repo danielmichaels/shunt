@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/authmgr/providers"
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/authmgr/providers"
+	"github.com/danielmichaels/shunt/internal/logger"
 )
 
 // Timeout and jitter constants for auth manager operations

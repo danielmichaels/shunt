@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -151,7 +151,7 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 
 	if len(sr.streams) == 0 {
 		sr.logger.Warn("no JetStream streams found - rules will fail to initialize")
-		return fmt.Errorf("no JetStream streams found - please create streams before starting rule-router")
+		return fmt.Errorf("no JetStream streams found - please create streams before starting shunt")
 	}
 
 	sr.discovered = true

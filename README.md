@@ -1,206 +1,154 @@
-# Rule Router & HTTP Gateway
+# Shunt
 
-A high-performance, rule-based messaging platform for NATS, providing an internal message router, a bidirectional HTTP gateway, and an automated token manager for secure API integration.
+A high-performance, rule-based message router for NATS JetStream with an integrated HTTP gateway and automated token management.
 
-This monorepo contains three primary, interoperable applications built on a shared, powerful rule engine:
-
-*   **`rule-router`**: A high-throughput NATS-to-NATS message router for internal, event-driven workflows.
-*   **`http-gateway`**: A bidirectional bridge for integrating external systems with your NATS fabric via webhooks (HTTP → NATS) and outbound API calls (NATS → HTTP).
-*   **`nats-auth-manager`**: A standalone utility that securely manages and refreshes API tokens (OAuth2, etc.), storing them in NATS KV for use by the `http-gateway` on outbound webhooks.
-
----
+Rules are stored in NATS KV and hot-reloaded via KV Watch — no restarts required.
 
 ## Features
 
-The platform is designed for performance, security, and flexibility in event-driven architectures.
+*   **High Performance**: Microsecond rule evaluation, asynchronous processing, thousands of messages per second.
+*   **KV-Based Rules**: Rules stored in NATS KV, hot-reloaded via Watch. Manage with `shunt kv push/pull/list/delete`.
+*   **Array Processing**: Batch message processing with array operators (`any`, `all`, `none`) and `forEach` iteration.
+*   **Primitive Message Support**: Handle strings, numbers, arrays, and objects at the root.
+*   **HTTP Gateway** (optional subsystem): Bidirectional HTTP-to-NATS bridge with inbound webhook ingestion and outbound API calls.
+*   **Auth Manager** (optional subsystem): OAuth2 and custom-HTTP token management, stored in NATS KV.
+*   **NATS JetStream Native**: Pull consumers for durable, scalable message processing.
+*   **Rule Engine**: Dynamic conditions, payload/header/subject templating, KV data enrichment with local cache, time-based logic.
+*   **Cryptographic Security**: NKey signature verification for message integrity.
+*   **Production Ready**: Structured logging, Prometheus metrics, graceful shutdown, full NATS auth support.
 
-*   **High Performance**: Microsecond rule evaluation, asynchronous processing, and thousands of messages per second.
-*   **Array Processing**: Native support for batch message processing with array operators and forEach iteration.
-*   **Primitive Message Support**: Handle strings, numbers, arrays, and objects at the root - perfect for IoT protocols and simple formats.
-*   **Bidirectional HTTP Gateway**:
-    *   **Inbound**: "Fire-and-forget" webhook ingestion returns `200 OK` immediately for maximum compatibility.
-    *   **Outbound**: "ACK-on-Success" API calls with configurable retries and exponential backoff ensure reliable delivery.
-*   **NATS JetStream Native**: Built on JetStream pull consumers for durable, scalable, and resilient message processing.
-*   **Powerful Rule Engine**:
-    *   **Dynamic Conditions**: Evaluate message payloads, headers, NATS subjects, and HTTP paths.
-    *   **Templating**: Construct new message payloads, subjects, URLs, and headers using data from the trigger.
-    *   **Key-Value Integration**: Enrich messages with data from NATS KV stores, with an optional local cache for a ~25x performance boost.
-    *   **Time-Based Logic**: Create rules that only run at certain times of day, on specific days, or within a time window.
-*   **Cryptographic Security**: Verify message integrity and authenticity using NATS NKey signatures.
-*   **Production Ready**: Structured logging, Prometheus metrics, graceful shutdown, and full NATS authentication support.
+## Architecture
 
-## Core Concepts
+Single binary with subcommands:
 
-The platform uses a simple `Trigger -> Conditions -> Action` model defined in YAML files.
-
-*   **Triggers** define what starts a rule (e.g., a NATS message on `sensors.>` or an HTTP POST to `/webhooks/github`).
-*   **Conditions** define the logic to determine if the action should run (e.g., `temperature > 30`).
-*   **Actions** define what to do if conditions pass (e.g., publish a new NATS message or make an HTTP call).
-
-**» For a complete guide, see the [Core Concepts documentation](./docs/01-core-concepts.md).**
-
-## Documentation
-
-Detailed documentation on the rule engine's features can be found in the `docs/` directory:
-
-*   **[01 - Core Concepts](./docs/01-core-concepts.md)**: Triggers, Conditions, Actions, and Environment Variables.
-*   **[02 - System Variables & Functions](./docs/02-system-variables.md)**: Full reference for all `@` variables and functions.
-*   **[03 - Array Processing](./docs/03-array-processing.md)**: Guide to using `forEach` and array operators (`any`, `all`, `none`).
-*   **[04 - Primitive & Array Root Messages](./docs/04-primitive-messages.md)**: How to handle non-object JSON payloads.
-*   **[05 - Security](./docs/05-security.md)**: Guide to Cryptographic Signature Verification.
-
----
+*   **`shunt serve`** — Start the routing server. Runs NATS-to-NATS message routing with optional subsystems:
+    *   **Gateway** (`gateway.enabled: true`): Bidirectional HTTP-to-NATS bridge for webhooks and outbound API calls.
+    *   **Auth Manager** (`authManager.enabled: true`): Manages OAuth2/custom-HTTP tokens in NATS KV.
+*   **`shunt kv push`** / `pull` / `list` / `delete` — Manage rules in NATS KV.
+*   **`shunt lint`** / `test` / `check` — Validate rules offline.
+*   **`shunt new`** / `scaffold` — Generate rule templates.
 
 ## Quick Start
 
 ### Prerequisites
 
-*   Go 1.23+
-*   A running NATS Server with JetStream enabled.
+*   Go 1.23+ (for building from source)
+*   A running NATS Server with JetStream enabled
 
-### 1. Build the Binaries
-
-From the root of the repository, build both applications:
+### 1. Build
 
 ```bash
-# Build the NATS-to-NATS router
-go build -o rule-router ./cmd/rule-router
-
-# Build the HTTP Gateway
-go build -o http-gateway ./cmd/http-gateway
+go build -o shunt ./cmd/shunt
 ```
 
-### 2. Configure NATS Streams
-
-For this example, we'll receive a webhook and route it to an internal alerts stream.
+### 2. Set Up NATS
 
 ```bash
-# Stream for messages coming from the HTTP gateway
-nats stream add WEBHOOKS --subjects "webhooks.>"
+# KV bucket for rule storage (required)
+nats kv add rules
 
-# Stream for critical alerts processed by the rule-router
+# Streams for your message subjects
+nats stream add EVENTS --subjects "events.>"
 nats stream add ALERTS --subjects "alerts.>"
 ```
 
-### 3. Create Rules
+### 3. Push Rules
 
-Create a `rules/` directory with two rule files.
-
-**`rules/http_ingress.yaml`** (For `http-gateway`)
-This rule listens for inbound webhooks at `/webhooks/devices` and publishes a standardized message to NATS.
+Write a rule file and push it to NATS KV:
 
 ```yaml
+# routing.yaml
 - trigger:
-    http:
-      path: "/webhooks/devices"
-      method: "POST"
+    nats:
+      subject: "events.device.status"
   conditions:
     operator: and
     items:
-      - field: "{status}"
-        operator: "eq"
-        value: "error"
-  action:
-    nats:
-      subject: "webhooks.devices.status"
-      payload: |
-        {
-          "device_id": "{device_id}",
-          "error_code": "{error.code}",
-          "error_message": "{error.message}",
-          "received_at": "{@timestamp()}"
-        }
-```
-
-**`rules/internal_routing.yaml`** (For `rule-router`)
-This rule listens for the internal status messages and routes critical errors to a dedicated alerts subject.
-
-```yaml
-- trigger:
-    nats:
-      subject: "webhooks.devices.status"
-  conditions:
-    operator: and
-    items:
-      - field: "{error_code}"
+      - field: "{severity}"
         operator: gte
-        value: 5000 # Critical error codes
+        value: 5
   action:
     nats:
       subject: "alerts.critical.{device_id}"
-      passthrough: true # Forward the original message payload
-      headers:
-        X-Routed-By: "rule-router"
+      passthrough: true
 ```
 
-### 4. Run the Applications
-
-You will need two separate configuration files (see the `config/` directory for examples).
-
-**Terminal 1: Start the HTTP Gateway**
 ```bash
-./http-gateway --config config/http-gateway.yaml --rules ./rules
+./shunt kv push routing.yaml --nats-url nats://localhost:4222
 ```
 
-**Terminal 2: Start the Rule Router**
+### 4. Run
+
 ```bash
-./rule-router --config config/rule-router.yaml --rules ./rules
+./shunt serve --nats-urls nats://localhost:4222
 ```
 
-### 5. Test the Flow
+Or with env vars:
 
-**Terminal 3: Subscribe to the final alerts subject**
 ```bash
-nats sub "alerts.>"
+SHUNT_NATS_URLS=nats://localhost:4222 SHUNT_METRICS_ENABLED=true ./shunt serve
 ```
 
-**Terminal 4: Send a test webhook**
+## Container Image
+
 ```bash
-curl -X POST http://localhost:8080/webhooks/devices \
-  -H "Content-Type: application/json" \
-  -d '{
-    "device_id": "sensor-123",
-    "status": "error",
-    "error": {
-      "code": 5001,
-      "message": "Internal system failure"
-    }
-  }'
+docker pull ghcr.io/danielmichaels/shunt:latest
+
+docker run --rm \
+  -e SHUNT_NATS_URLS=nats://nats:4222 \
+  -e SHUNT_METRICS_ENABLED=true \
+  -p 2112:2112 \
+  ghcr.io/danielmichaels/shunt:latest
 ```
 
-You will see the message appear on the `alerts.>` subscription, having been processed by both applications.
+Docker Compose:
 
-## Applications
+```yaml
+services:
+  shunt:
+    image: ghcr.io/danielmichaels/shunt:latest
+    environment:
+      SHUNT_NATS_URLS: nats://nats:4222
+      SHUNT_METRICS_ENABLED: "true"
+      SHUNT_GATEWAY_ENABLED: "true"
+    ports:
+      - "8080:8080"
+      - "2112:2112"
+    depends_on:
+      - nats
+  nats:
+    image: nats:latest
+    command: ["--jetstream"]
+    ports:
+      - "4222:4222"
+```
 
-*   **`cmd/rule-router`**: A dedicated NATS-to-NATS message router. Ideal for high-performance, internal event stream processing, filtering, and enrichment. [**» View Router README**](./cmd/rule-router/README.md)
+## Documentation
 
-*   **`cmd/http-gateway`**: A bidirectional HTTP-to-NATS gateway. Perfect for integrating with third-party webhooks and for triggering external APIs from NATS events. [**» View Gateway README**](./cmd/http-gateway/README.md)
-
-*   **`cmd/nats-auth-manager`**: A standalone service that handles OAuth2 and custom API authentication, storing tokens in NATS KV for use by other services. [**» View Auth Manager README**](./cmd/nats-auth-manager/README.md)
-
-*   **`cmd/rule-cli`**: A powerful command-line utility for linting, scaffolding, and testing your rules offline, enabling CI/CD and ensuring rule correctness. [**» View CLI README**](./cmd/rule-cli/README.md)
+*   **[01 - Core Concepts](./docs/01-core-concepts.md)**: Triggers, Conditions, Actions, and Environment Variables.
+*   **[02 - System Variables & Functions](./docs/02-system-variables.md)**: Full reference for all `@` variables and functions.
+*   **[03 - Array Processing](./docs/03-array-processing.md)**: Guide to `forEach` and array operators.
+*   **[04 - Primitive & Array Root Messages](./docs/04-primitive-messages.md)**: Non-object JSON payloads.
+*   **[05 - Security](./docs/05-security.md)**: Cryptographic Signature Verification.
+*   **[06 - Deployment](./docs/06-deployment.md)**: Container deployment, health checks, init containers.
+*   **[07 - Configuration](./docs/07-configuration.md)**: Complete configuration reference.
 
 ## Monitoring
 
-Both applications expose a Prometheus metrics endpoint, typically on port `:2112`. Key metrics include:
+Prometheus metrics endpoint on `:2112/metrics` (when `metrics.enabled` is `true`).
 
-**Message Processing:**
-*   `messages_total`: Total messages processed by status.
-*   `rule_matches_total`: Total number of times any rule has matched.
-*   `actions_total`: Total actions executed by status.
+Key metrics:
 
-**Array Operations:**
-*   `forEach_iterations_total`: Total array elements processed in forEach operations.
-*   `forEach_filtered_total`: Elements filtered out by forEach filter conditions.
-*   `forEach_actions_generated_total`: Actions successfully generated by forEach.
-
-**HTTP Gateway:**
-*   `http_inbound_requests_total`: (Gateway) Inbound HTTP requests.
-*   `http_outbound_requests_total`: (Gateway) Outbound HTTP requests.
-
-**Auth Manager:**
-*   `authmgr_auth_success_total`: Successful authentications by provider.
-*   `authmgr_auth_failures_total`: Failed authentications by provider.
+| Metric | Description |
+|---|---|
+| `messages_total` | Messages processed by status |
+| `rule_matches_total` | Rule match count |
+| `actions_total` | Actions executed by status |
+| `action_publish_failures_total` | NATS publish failures |
+| `nats_connection_status` | 1 = connected, 0 = disconnected |
+| `foreach_iterations_total` | Array elements processed in forEach |
+| `http_inbound_requests_total` | Inbound HTTP requests (gateway) |
+| `http_outbound_requests_total` | Outbound HTTP requests (gateway) |
 
 ## License
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 )
 
 // newTestLoader creates a loader with a nop logger and predefined KV buckets for testing.

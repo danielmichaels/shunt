@@ -1,4 +1,4 @@
-# Time-Based Rule Examples for rule-router
+# Time-Based Rule Examples for shunt
 # Demonstrates time evaluation capabilities using @ system fields with NATS subjects
 
 # Business Hours Temperature Alert

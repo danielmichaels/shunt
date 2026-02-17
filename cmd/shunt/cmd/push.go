@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/spf13/cobra"
 )
 

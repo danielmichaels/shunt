@@ -5,7 +5,7 @@ package rule
 import (
 	"testing"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 )
 
 func TestIsTemplate(t *testing.T) {

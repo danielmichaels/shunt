@@ -7,8 +7,8 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/danielmichaels/rule-engine/config"
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/logger"
 )
 
 // newTestBroker creates a minimal NATSBroker for testing policy parsing functions

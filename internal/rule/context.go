@@ -11,7 +11,7 @@ import (
 	json "github.com/goccy/go-json"
 	"github.com/nats-io/nkeys"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 )
 
 // System field prefixes for @ variables

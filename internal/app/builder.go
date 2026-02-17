@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/config"
-	"github.com/danielmichaels/rule-engine/internal/broker"
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/metrics"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/broker"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )

@@ -3,7 +3,7 @@
 package rule
 
 import (
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 	"sync"
 )
 

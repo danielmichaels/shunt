@@ -1,0 +1,77 @@
+version: "3"
+
+vars:
+  BIN_DIR: ./bin
+  LDFLAGS: -s -w
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task --list
+
+  build:
+    desc: Build all binaries
+    deps:
+      - build:shunt
+
+  build:shunt:
+    desc: Build shunt binary
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BIN_DIR}}/shunt ./cmd/shunt
+    sources:
+      - cmd/**/*.go
+      - internal/**/*.go
+      - config/**/*.go
+      - go.mod
+    generates:
+      - "{{.BIN_DIR}}/shunt"
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:verbose:
+    desc: Run all tests with verbose output
+    cmds:
+      - go test -v ./...
+
+  test:cover:
+    desc: Run tests with HTML coverage report
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format code and tidy modules
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+
+  docker:build:
+    desc: Build Docker image
+    cmds:
+      - docker build -t shunt .
+
+  run:shunt:
+    desc: Build and run shunt
+    deps:
+      - build:shunt
+    cmds:
+      - ./bin/shunt {{.CLI_ARGS}}
+
+  dev:
+    desc: Run shunt with hot-reloading (air)
+    cmds:
+      - air
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf {{.BIN_DIR}} coverage.out coverage.html

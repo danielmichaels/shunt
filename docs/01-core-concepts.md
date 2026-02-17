@@ -236,7 +236,7 @@ The rule engine supports environment variable expansion for static configuration
 
 ### How It Works
 
-Environment variables are expanded **at load time** (when rules are parsed from YAML files), not at runtime. This means:
+Environment variables are expanded **at load time** (when rules are loaded from the NATS KV bucket), not at runtime. This means:
 
 - ✅ **Performance**: Zero runtime overhead - values are substituted once during startup
 - ✅ **Security**: Secrets are never stored in rule files

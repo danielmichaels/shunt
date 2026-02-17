@@ -13,9 +13,9 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/metrics"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/rule"
 )
 
 // Server defaults and limits

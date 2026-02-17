@@ -1,19 +1,18 @@
-# NATS Rule Router Configuration
+# Shunt Configuration
 # High-Performance Message Routing with NATS JetStream and Key-Value Store Support
-# Featuring Local KV Cache for Maximum Edge Performance
 
 # NATS Server Connection and JetStream Configuration
 nats:
   # Connection URLs - supports multiple servers for high availability
   urls:
-    - nats://nats-server-1:4222
-    - nats://nats-server-2:4222
-    - nats://nats-server-3:4222
+#    - nats://nats-server-1:4222
+#    - nats://nats-server-2:4222
+    - nats://localhost:4442
   
   # Authentication Options (choose one)
   # Option 1: Username/Password
-  username: "rule-router-service"
-  password: "secure-password"
+#  username: "shunt-service"
+#  password: "secure-password"
   
   # Option 2: Token Authentication
   # token: "your-nats-token"
@@ -22,11 +21,11 @@ nats:
   # nkey: "your-nkey-here"
   
   # Option 4: JWT with .creds file (recommended for production)
-  # credsFile: "/etc/nats/creds/rule-router.creds"
+  # credsFile: "/etc/nats/creds/shunt.creds"
   
   # TLS Configuration
   tls:
-    enable: true
+    enable: false
     certFile: "/etc/ssl/nats/client-cert.pem"
     keyFile: "/etc/ssl/nats/client-key.pem"
     caFile: "/etc/ssl/nats/ca.pem"
@@ -34,7 +33,7 @@ nats:
   
   # JetStream Consumer Configuration
   consumers:
-    consumerPrefix: "rule-router" # Unique prefix for this application's consumers
+    consumerPrefix: "shunt" # Unique prefix for this application's consumers
     # Performance Tuning
     workerCount: 8            # Concurrent workers per subscription (recommend: 2-4x CPU cores)
     fetchBatchSize: 64        # Messages to fetch per pull request
@@ -108,6 +107,9 @@ nats:
 # NATS Key-Value Store Configuration with Local Cache
 kv:
   enabled: true
+  # Auto-provision creates KV buckets that don't exist on startup
+  # Set to false in production if buckets should be pre-created manually
+  autoProvision: true
   buckets:
     - "device_status"         # Device operational status
     - "device_config"         # Device configuration and thresholds
@@ -145,7 +147,7 @@ logging:
                               # error: Only errors
   
   outputPath: stdout          # Output destination: stdout, stderr, or file path
-                              # Examples: stdout, /var/log/rule-router.log
+                              # Examples: stdout, /var/log/shunt.log
   
   encoding: json              # Log format: json or console
                               # json: Structured logging for log aggregation

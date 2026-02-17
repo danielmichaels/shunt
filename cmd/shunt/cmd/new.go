@@ -1,4 +1,4 @@
-// file: cmd/rule-cli/cmd/new.go
+// file: cmd/shunt/cmd/new.go
 package cmd
 
 import (
@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/danielmichaels/rule-engine/internal/cli"
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/rule"
-	"github.com/danielmichaels/rule-engine/internal/tester"
+	"github.com/danielmichaels/shunt/internal/cli"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/rule"
+	"github.com/danielmichaels/shunt/internal/tester"
 	"github.com/spf13/cobra"
 )
 

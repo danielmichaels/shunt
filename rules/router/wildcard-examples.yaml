@@ -1,4 +1,4 @@
-# Wildcard Pattern Examples for rule-router
+# Wildcard Pattern Examples for shunt
 # Demonstrates single-level (*) and multi-level (>) wildcards with subject access
 
 # Example 1: Single-Level Wildcard for All Sensors

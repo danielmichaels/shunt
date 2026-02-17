@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/config"
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/metrics"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -442,7 +442,7 @@ func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream
 			}
 		} else if action.HTTP != nil {
 			// HTTP actions will be handled by http-gateway
-			sm.logger.Warn("HTTP action detected in rule-router - HTTP actions not supported in this application",
+			sm.logger.Warn("HTTP action detected in shunt - HTTP actions not supported in this application",
 				"actionURL", action.HTTP.URL,
 				"hint", "Use http-gateway for HTTP actions")
 		} else {

@@ -7,7 +7,7 @@ package lifecycle
 import "context"
 
 // Application represents a runnable application that supports graceful
-// shutdown and runtime reloading. Both rule-router and http-gateway
+// shutdown and runtime reloading. Both shunt and http-gateway
 // implement this interface.
 type Application interface {
 	// Run starts the application and blocks until the context is cancelled.

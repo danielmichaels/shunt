@@ -12,7 +12,7 @@ The rule engine provides a rich set of system variables (prefixed with `@`) that
 | `{@value}` | Access primitive value (strings, numbers, booleans at root or in arrays) | `{@value}` → `"ERROR: timeout"` |
 | `{@items}` | Access array at root level | Field reference for root arrays |
 
-## NATS Subject Context (`rule-router` only)
+## NATS Subject Context (NATS triggers)
 
 | Variable | Description | Example Value |
 |----------|-------------|---------------|
@@ -22,7 +22,7 @@ The rule engine provides a rich set of system variables (prefixed with `@`) that
 | `{@subject.N}` | Nth token (zero-indexed) | `room1` |
 | `{@subject.count}` | Number of tokens in subject | `3` |
 
-## HTTP Context (`http-gateway` only)
+## HTTP Context (HTTP triggers)
 
 | Variable | Description | Example Value |
 |----------|-------------|---------------|

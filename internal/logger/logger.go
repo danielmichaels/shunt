@@ -4,7 +4,7 @@ package logger
 
 import (
 	"fmt"
-	"github.com/danielmichaels/rule-engine/config"
+	"github.com/danielmichaels/shunt/config"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"

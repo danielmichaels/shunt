@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,7 +106,7 @@ const (
 // Default string configuration values
 const (
 	// DefaultConsumerPrefix is the default prefix for consumer names
-	DefaultConsumerPrefix = "rule-router"
+	DefaultConsumerPrefix = "shunt"
 
 	// DefaultPublishMode is the default NATS publish mode
 	DefaultPublishMode = "jetstream"
@@ -141,7 +142,7 @@ const (
 	DefaultSignatureHeader = "Nats-Signature"
 )
 
-// Config represents the unified configuration for rule-router
+// Config represents the unified configuration for shunt
 type Config struct {
 	NATS        NATSConfig        `json:"nats" yaml:"nats" mapstructure:"nats"`
 	HTTP        HTTPConfig        `json:"http,omitempty" yaml:"http,omitempty" mapstructure:"http"`
@@ -299,9 +300,10 @@ type MetricsConfig struct {
 
 // KVConfig contains Key-Value store configuration
 type KVConfig struct {
-	Enabled    bool     `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
-	Buckets    []string `json:"buckets" yaml:"buckets" mapstructure:"buckets"`
-	LocalCache struct {
+	Enabled       bool     `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
+	AutoProvision bool     `json:"autoProvision" yaml:"autoProvision" mapstructure:"autoProvision"`
+	Buckets       []string `json:"buckets" yaml:"buckets" mapstructure:"buckets"`
+	LocalCache    struct {
 		Enabled bool `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
 	} `json:"localCache" yaml:"localCache" mapstructure:"localCache"`
 }
@@ -319,39 +321,38 @@ type VerificationConfig struct {
 }
 
 // Load reads configuration using Viper, supporting file, env vars, and flags.
-func Load(path string) (*Config, error) {
-	v := viper.New()
+// If v is nil, a fresh viper instance is created. Pass an existing viper with
+// bound pflags to enable CLI flag overrides.
+func Load(path string, v *viper.Viper) (*Config, error) {
+	if v == nil {
+		v = viper.New()
+	}
 
-	// Set the config file path and type
 	v.SetConfigFile(path)
 	ext := filepath.Ext(path)
 	v.SetConfigType(strings.TrimPrefix(ext, "."))
 
-	// Configure environment variable handling
-	v.SetEnvPrefix("RR") // e.g., RR_NATS_URLS
+	v.SetEnvPrefix("SHUNT")
 	v.AutomaticEnv()
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // Allows RR_HTTP_SERVER_ADDRESS
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// Read the configuration file
+	setViperDefaults(v)
+
 	if err := v.ReadInConfig(); err != nil {
-		// It's okay if the config file doesn't exist, we can rely on env vars/flags
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("failed to read config file: %w", err)
+			}
 		}
 	}
 
 	var config Config
-
-	// Set defaults first
-	setDefaults(&config)
-
-	// Unmarshal the configuration into the struct. This merges all sources:
-	// file, environment variables, and any bound flags.
 	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Run final validation
+	applyConditionalDefaults(&config)
+
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -360,152 +361,101 @@ func Load(path string) (*Config, error) {
 }
 
 
-// setDefaults applies default values to the configuration
-func setDefaults(cfg *Config) {
-	// NATS defaults
-	if len(cfg.NATS.URLs) == 0 {
-		cfg.NATS.URLs = []string{DefaultNATSURL}
-	}
-	if cfg.NATS.Connection.MaxReconnects == 0 {
-		cfg.NATS.Connection.MaxReconnects = -1
-	}
-	if cfg.NATS.Connection.ReconnectWait == 0 {
-		cfg.NATS.Connection.ReconnectWait = DefaultReconnectWait
-	}
+// setViperDefaults registers all config keys with viper so that AutomaticEnv
+// can resolve environment variables during Unmarshal. Without this, viper's
+// key registry is empty for keys absent from the YAML file.
+func setViperDefaults(v *viper.Viper) {
+	// NATS
+	v.SetDefault("nats.urls", []string{DefaultNATSURL})
+	v.SetDefault("nats.username", "")
+	v.SetDefault("nats.password", "")
+	v.SetDefault("nats.token", "")
+	v.SetDefault("nats.nkey", "")
+	v.SetDefault("nats.credsFile", "")
+	v.SetDefault("nats.tls.enable", false)
+	v.SetDefault("nats.tls.certFile", "")
+	v.SetDefault("nats.tls.keyFile", "")
+	v.SetDefault("nats.tls.caFile", "")
+	v.SetDefault("nats.tls.insecure", false)
+	v.SetDefault("nats.connection.maxReconnects", -1)
+	v.SetDefault("nats.connection.reconnectWait", DefaultReconnectWait)
 
-	// Consumer defaults
-	if cfg.NATS.Consumers.ConsumerPrefix == "" {
-		cfg.NATS.Consumers.ConsumerPrefix = DefaultConsumerPrefix
-	}
-	if cfg.NATS.Consumers.WorkerCount == 0 {
-		cfg.NATS.Consumers.WorkerCount = DefaultWorkerCount
-	}
-	if cfg.NATS.Consumers.FetchBatchSize == 0 {
-		cfg.NATS.Consumers.FetchBatchSize = DefaultFetchBatchSize
-	}
-	if cfg.NATS.Consumers.FetchTimeout == 0 {
-		cfg.NATS.Consumers.FetchTimeout = DefaultFetchTimeout
-	}
-	if cfg.NATS.Consumers.AckWaitTimeout == 0 {
-		cfg.NATS.Consumers.AckWaitTimeout = DefaultAckWaitTimeout
-	}
-	if cfg.NATS.Consumers.MaxDeliver == 0 {
-		cfg.NATS.Consumers.MaxDeliver = DefaultMaxDeliver
-	}
-	if cfg.NATS.Consumers.MaxAckPending == 0 {
-		cfg.NATS.Consumers.MaxAckPending = DefaultMaxAckPending
-	}
-	if cfg.NATS.Consumers.DeliverPolicy == "" {
-		cfg.NATS.Consumers.DeliverPolicy = DefaultDeliverPolicy
-	}
-	if cfg.NATS.Consumers.ReplayPolicy == "" {
-		cfg.NATS.Consumers.ReplayPolicy = DefaultReplayPolicy
-	}
+	// Consumers
+	v.SetDefault("nats.consumers.consumerPrefix", DefaultConsumerPrefix)
+	v.SetDefault("nats.consumers.workerCount", DefaultWorkerCount)
+	v.SetDefault("nats.consumers.fetchBatchSize", DefaultFetchBatchSize)
+	v.SetDefault("nats.consumers.fetchTimeout", DefaultFetchTimeout)
+	v.SetDefault("nats.consumers.maxAckPending", DefaultMaxAckPending)
+	v.SetDefault("nats.consumers.ackWaitTimeout", DefaultAckWaitTimeout)
+	v.SetDefault("nats.consumers.maxDeliver", DefaultMaxDeliver)
+	v.SetDefault("nats.consumers.deliverPolicy", DefaultDeliverPolicy)
+	v.SetDefault("nats.consumers.replayPolicy", DefaultReplayPolicy)
 
-	// Publish defaults
-	if cfg.NATS.Publish.Mode == "" {
-		cfg.NATS.Publish.Mode = DefaultPublishMode
-	}
-	if cfg.NATS.Publish.AckTimeout == 0 {
-		cfg.NATS.Publish.AckTimeout = DefaultPublishAckTimeout
-	}
-	if cfg.NATS.Publish.MaxRetries == 0 {
-		cfg.NATS.Publish.MaxRetries = DefaultPublishMaxRetries
-	}
-	if cfg.NATS.Publish.RetryBaseDelay == 0 {
-		cfg.NATS.Publish.RetryBaseDelay = DefaultRetryBaseDelay
-	}
+	// Publish
+	v.SetDefault("nats.publish.mode", DefaultPublishMode)
+	v.SetDefault("nats.publish.ackTimeout", DefaultPublishAckTimeout)
+	v.SetDefault("nats.publish.maxRetries", DefaultPublishMaxRetries)
+	v.SetDefault("nats.publish.retryBaseDelay", DefaultRetryBaseDelay)
 
-	// HTTP Server defaults
-	if cfg.HTTP.Server.Address == "" {
-		cfg.HTTP.Server.Address = DefaultHTTPServerAddress
-	}
-	if cfg.HTTP.Server.ReadTimeout == 0 {
-		cfg.HTTP.Server.ReadTimeout = DefaultHTTPReadTimeout
-	}
-	if cfg.HTTP.Server.WriteTimeout == 0 {
-		cfg.HTTP.Server.WriteTimeout = DefaultHTTPWriteTimeout
-	}
-	if cfg.HTTP.Server.IdleTimeout == 0 {
-		cfg.HTTP.Server.IdleTimeout = DefaultHTTPIdleTimeout
-	}
-	if cfg.HTTP.Server.MaxHeaderBytes == 0 {
-		cfg.HTTP.Server.MaxHeaderBytes = DefaultMaxHeaderBytes
-	}
-	if cfg.HTTP.Server.ShutdownGracePeriod == 0 {
-		cfg.HTTP.Server.ShutdownGracePeriod = DefaultHTTPShutdownGracePeriod
-	}
+	// HTTP Server
+	v.SetDefault("http.server.address", DefaultHTTPServerAddress)
+	v.SetDefault("http.server.readTimeout", DefaultHTTPReadTimeout)
+	v.SetDefault("http.server.writeTimeout", DefaultHTTPWriteTimeout)
+	v.SetDefault("http.server.idleTimeout", DefaultHTTPIdleTimeout)
+	v.SetDefault("http.server.maxHeaderBytes", DefaultMaxHeaderBytes)
+	v.SetDefault("http.server.shutdownGracePeriod", DefaultHTTPShutdownGracePeriod)
+	v.SetDefault("http.server.inboundWorkerCount", 10)
+	v.SetDefault("http.server.inboundQueueSize", DefaultInboundQueueSize)
 
-	// HTTP Client defaults
-	if cfg.HTTP.Client.Timeout == 0 {
-		cfg.HTTP.Client.Timeout = DefaultHTTPClientTimeout
-	}
-	if cfg.HTTP.Client.MaxIdleConns == 0 {
-		cfg.HTTP.Client.MaxIdleConns = DefaultMaxIdleConns
-	}
-	if cfg.HTTP.Client.MaxIdleConnsPerHost == 0 {
-		cfg.HTTP.Client.MaxIdleConnsPerHost = DefaultMaxIdleConnsPerHost
-	}
-	if cfg.HTTP.Client.IdleConnTimeout == 0 {
-		cfg.HTTP.Client.IdleConnTimeout = DefaultHTTPIdleConnTimeout
-	}
-	if cfg.HTTP.Server.InboundWorkerCount == 0 {
-		cfg.HTTP.Server.InboundWorkerCount = 10
-	}
-	if cfg.HTTP.Server.InboundQueueSize == 0 {
-		cfg.HTTP.Server.InboundQueueSize = DefaultInboundQueueSize
-	}
+	// HTTP Client
+	v.SetDefault("http.client.timeout", DefaultHTTPClientTimeout)
+	v.SetDefault("http.client.maxIdleConns", DefaultMaxIdleConns)
+	v.SetDefault("http.client.maxIdleConnsPerHost", DefaultMaxIdleConnsPerHost)
+	v.SetDefault("http.client.idleConnTimeout", DefaultHTTPIdleConnTimeout)
+	v.SetDefault("http.client.tls.insecureSkipVerify", false)
 
-	// Logging defaults
-	if cfg.Logging.Level == "" {
-		cfg.Logging.Level = DefaultLogLevel
-	}
-	if cfg.Logging.Encoding == "" {
-		cfg.Logging.Encoding = DefaultLogEncoding
-	}
-	if cfg.Logging.OutputPath == "" {
-		cfg.Logging.OutputPath = DefaultLogOutput
-	}
+	// Logging
+	v.SetDefault("logging.level", DefaultLogLevel)
+	v.SetDefault("logging.encoding", DefaultLogEncoding)
+	v.SetDefault("logging.outputPath", DefaultLogOutput)
 
-	// Metrics defaults
-	if !cfg.Metrics.Enabled {
-		// If metrics are disabled, don't set address/path defaults
-	} else {
-		if cfg.Metrics.Address == "" {
-			cfg.Metrics.Address = DefaultMetricsAddress
-		}
-		if cfg.Metrics.Path == "" {
-			cfg.Metrics.Path = DefaultMetricsPath
-		}
-		if cfg.Metrics.UpdateInterval == "" {
-			cfg.Metrics.UpdateInterval = "15s"
-		}
-	}
+	// Metrics
+	v.SetDefault("metrics.enabled", true)
+	v.SetDefault("metrics.address", DefaultMetricsAddress)
+	v.SetDefault("metrics.path", DefaultMetricsPath)
+	v.SetDefault("metrics.updateInterval", "15s")
 
-	// KV defaults
+	// KV
+	v.SetDefault("kv.enabled", false)
+	v.SetDefault("kv.autoProvision", true)
+	v.SetDefault("kv.localCache.enabled", false)
+
+	// Rules
+	v.SetDefault("rules.kvBucket", "rules")
+
+	// Security
+	v.SetDefault("security.verification.enabled", false)
+	v.SetDefault("security.verification.publicKeyHeader", DefaultPublicKeyHeader)
+	v.SetDefault("security.verification.signatureHeader", DefaultSignatureHeader)
+
+	// ForEach
+	v.SetDefault("forEach.maxIterations", DefaultForEachMaxIterations)
+
+	// Gateway
+	v.SetDefault("gateway.enabled", false)
+
+	// AuthManager
+	v.SetDefault("authManager.enabled", false)
+	v.SetDefault("authManager.storage.bucket", "")
+	v.SetDefault("authManager.storage.keyPrefix", "")
+}
+
+// applyConditionalDefaults handles defaults that depend on other config values
+// and cannot be expressed as static viper defaults.
+func applyConditionalDefaults(cfg *Config) {
 	if cfg.KV.Enabled {
 		cfg.KV.LocalCache.Enabled = true
 	}
-
-	// Rules defaults
-	if cfg.Rules.KVBucket == "" {
-		cfg.Rules.KVBucket = "rules"
-	}
-
-	// Security defaults
-	if cfg.Security.Verification.PublicKeyHeader == "" {
-		cfg.Security.Verification.PublicKeyHeader = DefaultPublicKeyHeader
-	}
-	if cfg.Security.Verification.SignatureHeader == "" {
-		cfg.Security.Verification.SignatureHeader = DefaultSignatureHeader
-	}
-
-	// ForEach defaults
-	if cfg.ForEach.MaxIterations == 0 {
-		cfg.ForEach.MaxIterations = DefaultForEachMaxIterations
-	}
-
-	// AuthManager defaults
 	if cfg.AuthManager.Enabled && cfg.AuthManager.Storage.Bucket == "" {
 		cfg.AuthManager.Storage.Bucket = "tokens"
 	}
@@ -544,10 +494,25 @@ func validateConfig(cfg *Config) error {
 		if cfg.NATS.TLS.KeyFile != "" && cfg.NATS.TLS.CertFile == "" {
 			return fmt.Errorf("NATS TLS cert file is required when a key file is provided")
 		}
+		if cfg.NATS.TLS.CertFile != "" {
+			if _, err := os.Stat(cfg.NATS.TLS.CertFile); errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("NATS TLS cert file does not exist: %s", cfg.NATS.TLS.CertFile)
+			}
+		}
+		if cfg.NATS.TLS.KeyFile != "" {
+			if _, err := os.Stat(cfg.NATS.TLS.KeyFile); errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("NATS TLS key file does not exist: %s", cfg.NATS.TLS.KeyFile)
+			}
+		}
+		if cfg.NATS.TLS.CAFile != "" {
+			if _, err := os.Stat(cfg.NATS.TLS.CAFile); errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("NATS TLS CA file does not exist: %s", cfg.NATS.TLS.CAFile)
+			}
+		}
 	}
 
 	if cfg.NATS.CredsFile != "" {
-		if _, err := os.Stat(cfg.NATS.CredsFile); os.IsNotExist(err) {
+		if _, err := os.Stat(cfg.NATS.CredsFile); errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("NATS creds file does not exist: %s", cfg.NATS.CredsFile)
 		}
 	}

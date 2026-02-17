@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/danielmichaels/rule-engine/cmd/rule-cli/templates"
+	"github.com/danielmichaels/shunt/cmd/shunt/templates"
 )
 
 // Renderer handles the logic for listing, showing, and rendering rule templates.

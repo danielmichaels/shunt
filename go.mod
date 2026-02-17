@@ -1,4 +1,4 @@
-module github.com/danielmichaels/rule-engine
+module github.com/danielmichaels/shunt
 
 go 1.23.4
 

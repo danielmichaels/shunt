@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/config"
+	"github.com/danielmichaels/shunt/config"
 	"github.com/spf13/viper"
 )
 
@@ -27,7 +27,7 @@ type Config struct {
 	Providers []ProviderConfig `mapstructure:"providers"`
 }
 
-// NATSConfig mirrors rule-router NATS config (connection only)
+// NATSConfig mirrors shunt NATS config (connection only)
 type NATSConfig struct {
 	URLs      []string `mapstructure:"urls"`
 	Username  string   `mapstructure:"username"`
@@ -47,8 +47,9 @@ type NATSConfig struct {
 
 // StorageConfig defines where to store tokens
 type StorageConfig struct {
-	Bucket    string `mapstructure:"bucket"`    // KV bucket name
-	KeyPrefix string `mapstructure:"keyPrefix"` // Optional prefix for keys
+	Bucket        string `mapstructure:"bucket"`    // KV bucket name
+	KeyPrefix     string `mapstructure:"keyPrefix"` // Optional prefix for keys
+	AutoProvision bool   `mapstructure:"-"`         // Set programmatically, not from config file
 }
 
 // MetricsConfig for optional Prometheus metrics

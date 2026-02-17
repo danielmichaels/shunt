@@ -1,229 +1,130 @@
-// file: config/config_test.go
-
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
-func TestSetDefaults(t *testing.T) {
-	tests := []struct {
-		name     string
-		initial  Config
-		validate func(t *testing.T, cfg *Config)
+func TestSetViperDefaults(t *testing.T) {
+	v := viper.New()
+	setViperDefaults(v)
+
+	checks := []struct {
+		key  string
+		want any
 	}{
-		{
-			name:    "empty config gets all defaults",
-			initial: Config{},
-			validate: func(t *testing.T, cfg *Config) {
-				// NATS defaults
-				if len(cfg.NATS.URLs) != 1 || cfg.NATS.URLs[0] != "nats://localhost:4222" {
-					t.Errorf("NATS URLs = %v, want [nats://localhost:4222]", cfg.NATS.URLs)
-				}
-				if cfg.NATS.Connection.MaxReconnects != -1 {
-					t.Errorf("MaxReconnects = %d, want -1", cfg.NATS.Connection.MaxReconnects)
-				}
-				if cfg.NATS.Connection.ReconnectWait != 50*time.Millisecond {
-					t.Errorf("ReconnectWait = %v, want 50ms", cfg.NATS.Connection.ReconnectWait)
-				}
-
-				// Consumer defaults
-				if cfg.NATS.Consumers.ConsumerPrefix != "rule-router" {
-					t.Errorf("ConsumerPrefix = %s, want rule-router", cfg.NATS.Consumers.ConsumerPrefix)
-				}
-				if cfg.NATS.Consumers.WorkerCount != 2 {
-					t.Errorf("WorkerCount = %d, want 2", cfg.NATS.Consumers.WorkerCount)
-				}
-				if cfg.NATS.Consumers.FetchBatchSize != 1 {
-					t.Errorf("FetchBatchSize = %d, want 1", cfg.NATS.Consumers.FetchBatchSize)
-				}
-				if cfg.NATS.Consumers.FetchTimeout != 5*time.Second {
-					t.Errorf("FetchTimeout = %v, want 5s", cfg.NATS.Consumers.FetchTimeout)
-				}
-				if cfg.NATS.Consumers.AckWaitTimeout != 30*time.Second {
-					t.Errorf("AckWaitTimeout = %v, want 30s", cfg.NATS.Consumers.AckWaitTimeout)
-				}
-				if cfg.NATS.Consumers.MaxDeliver != 3 {
-					t.Errorf("MaxDeliver = %d, want 3", cfg.NATS.Consumers.MaxDeliver)
-				}
-				if cfg.NATS.Consumers.MaxAckPending != 1000 {
-					t.Errorf("MaxAckPending = %d, want 1000", cfg.NATS.Consumers.MaxAckPending)
-				}
-				if cfg.NATS.Consumers.DeliverPolicy != "new" {
-					t.Errorf("DeliverPolicy = %s, want new", cfg.NATS.Consumers.DeliverPolicy)
-				}
-				if cfg.NATS.Consumers.ReplayPolicy != "instant" {
-					t.Errorf("ReplayPolicy = %s, want instant", cfg.NATS.Consumers.ReplayPolicy)
-				}
-
-				// Publish defaults
-				if cfg.NATS.Publish.Mode != "jetstream" {
-					t.Errorf("Publish.Mode = %s, want jetstream", cfg.NATS.Publish.Mode)
-				}
-				if cfg.NATS.Publish.AckTimeout != 5*time.Second {
-					t.Errorf("Publish.AckTimeout = %v, want 5s", cfg.NATS.Publish.AckTimeout)
-				}
-				if cfg.NATS.Publish.MaxRetries != 3 {
-					t.Errorf("Publish.MaxRetries = %d, want 3", cfg.NATS.Publish.MaxRetries)
-				}
-
-				// HTTP Server defaults
-				if cfg.HTTP.Server.Address != ":8080" {
-					t.Errorf("HTTP.Server.Address = %s, want :8080", cfg.HTTP.Server.Address)
-				}
-				if cfg.HTTP.Server.ReadTimeout != 30*time.Second {
-					t.Errorf("HTTP.Server.ReadTimeout = %v, want 30s", cfg.HTTP.Server.ReadTimeout)
-				}
-				if cfg.HTTP.Server.InboundWorkerCount != 10 {
-					t.Errorf("HTTP.Server.InboundWorkerCount = %d, want 10", cfg.HTTP.Server.InboundWorkerCount)
-				}
-				if cfg.HTTP.Server.InboundQueueSize != 1000 {
-					t.Errorf("HTTP.Server.InboundQueueSize = %d, want 1000", cfg.HTTP.Server.InboundQueueSize)
-				}
-
-				// HTTP Client defaults
-				if cfg.HTTP.Client.Timeout != 30*time.Second {
-					t.Errorf("HTTP.Client.Timeout = %v, want 30s", cfg.HTTP.Client.Timeout)
-				}
-				if cfg.HTTP.Client.MaxIdleConns != 100 {
-					t.Errorf("HTTP.Client.MaxIdleConns = %d, want 100", cfg.HTTP.Client.MaxIdleConns)
-				}
-
-				// Logging defaults
-				if cfg.Logging.Level != "info" {
-					t.Errorf("Logging.Level = %s, want info", cfg.Logging.Level)
-				}
-				if cfg.Logging.Encoding != "json" {
-					t.Errorf("Logging.Encoding = %s, want json", cfg.Logging.Encoding)
-				}
-				if cfg.Logging.OutputPath != "stdout" {
-					t.Errorf("Logging.OutputPath = %s, want stdout", cfg.Logging.OutputPath)
-				}
-
-				// Security defaults
-				if cfg.Security.Verification.PublicKeyHeader != "Nats-Public-Key" {
-					t.Errorf("PublicKeyHeader = %s, want Nats-Public-Key", cfg.Security.Verification.PublicKeyHeader)
-				}
-				if cfg.Security.Verification.SignatureHeader != "Nats-Signature" {
-					t.Errorf("SignatureHeader = %s, want Nats-Signature", cfg.Security.Verification.SignatureHeader)
-				}
-
-				// ForEach defaults
-				if cfg.ForEach.MaxIterations != 100 {
-					t.Errorf("ForEach.MaxIterations = %d, want 100", cfg.ForEach.MaxIterations)
-				}
-
-				// Rules defaults
-				if cfg.Rules.KVBucket != "rules" {
-					t.Errorf("Rules.KVBucket = %s, want rules", cfg.Rules.KVBucket)
-				}
-			},
-		},
-		{
-			name: "custom rules kvBucket preserved",
-			initial: Config{
-				Rules: RulesConfig{KVBucket: "my-rules"},
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if cfg.Rules.KVBucket != "my-rules" {
-					t.Errorf("Rules.KVBucket = %s, want my-rules", cfg.Rules.KVBucket)
-				}
-			},
-		},
-		{
-			name: "existing values not overwritten",
-			initial: Config{
-				NATS: NATSConfig{
-					URLs: []string{"nats://custom:4222"},
-					Consumers: ConsumerConfig{
-						ConsumerPrefix: "custom-prefix",
-						WorkerCount:    5,
-					},
-				},
-				Logging: LogConfig{
-					Level: "debug",
-				},
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if len(cfg.NATS.URLs) != 1 || cfg.NATS.URLs[0] != "nats://custom:4222" {
-					t.Errorf("NATS URLs overwritten, got %v", cfg.NATS.URLs)
-				}
-				if cfg.NATS.Consumers.ConsumerPrefix != "custom-prefix" {
-					t.Errorf("ConsumerPrefix overwritten, got %s", cfg.NATS.Consumers.ConsumerPrefix)
-				}
-				if cfg.NATS.Consumers.WorkerCount != 5 {
-					t.Errorf("WorkerCount overwritten, got %d", cfg.NATS.Consumers.WorkerCount)
-				}
-				if cfg.Logging.Level != "debug" {
-					t.Errorf("Logging.Level overwritten, got %s", cfg.Logging.Level)
-				}
-			},
-		},
-		{
-			name: "metrics defaults only when enabled",
-			initial: Config{
-				Metrics: MetricsConfig{
-					Enabled: true,
-				},
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if cfg.Metrics.Address != ":2112" {
-					t.Errorf("Metrics.Address = %s, want :2112", cfg.Metrics.Address)
-				}
-				if cfg.Metrics.Path != "/metrics" {
-					t.Errorf("Metrics.Path = %s, want /metrics", cfg.Metrics.Path)
-				}
-				if cfg.Metrics.UpdateInterval != "15s" {
-					t.Errorf("Metrics.UpdateInterval = %s, want 15s", cfg.Metrics.UpdateInterval)
-				}
-			},
-		},
-		{
-			name: "metrics disabled leaves address empty",
-			initial: Config{
-				Metrics: MetricsConfig{
-					Enabled: false,
-				},
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if cfg.Metrics.Address != "" {
-					t.Errorf("Metrics.Address should be empty when disabled, got %s", cfg.Metrics.Address)
-				}
-			},
-		},
-		{
-			name: "KV local cache enabled when KV enabled",
-			initial: Config{
-				KV: KVConfig{
-					Enabled: true,
-				},
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if !cfg.KV.LocalCache.Enabled {
-					t.Error("KV.LocalCache.Enabled should be true when KV is enabled")
-				}
-			},
-		},
+		{"nats.connection.maxReconnects", -1},
+		{"nats.connection.reconnectWait", DefaultReconnectWait},
+		{"nats.consumers.consumerPrefix", DefaultConsumerPrefix},
+		{"nats.consumers.workerCount", DefaultWorkerCount},
+		{"nats.consumers.fetchBatchSize", DefaultFetchBatchSize},
+		{"nats.consumers.fetchTimeout", DefaultFetchTimeout},
+		{"nats.consumers.maxAckPending", DefaultMaxAckPending},
+		{"nats.consumers.ackWaitTimeout", DefaultAckWaitTimeout},
+		{"nats.consumers.maxDeliver", DefaultMaxDeliver},
+		{"nats.consumers.deliverPolicy", DefaultDeliverPolicy},
+		{"nats.consumers.replayPolicy", DefaultReplayPolicy},
+		{"nats.publish.mode", DefaultPublishMode},
+		{"nats.publish.ackTimeout", DefaultPublishAckTimeout},
+		{"nats.publish.maxRetries", DefaultPublishMaxRetries},
+		{"nats.publish.retryBaseDelay", DefaultRetryBaseDelay},
+		{"nats.tls.enable", false},
+		{"http.server.address", DefaultHTTPServerAddress},
+		{"http.server.readTimeout", DefaultHTTPReadTimeout},
+		{"http.server.writeTimeout", DefaultHTTPWriteTimeout},
+		{"http.server.idleTimeout", DefaultHTTPIdleTimeout},
+		{"http.server.maxHeaderBytes", DefaultMaxHeaderBytes},
+		{"http.server.shutdownGracePeriod", DefaultHTTPShutdownGracePeriod},
+		{"http.server.inboundWorkerCount", 10},
+		{"http.server.inboundQueueSize", DefaultInboundQueueSize},
+		{"http.client.timeout", DefaultHTTPClientTimeout},
+		{"http.client.maxIdleConns", DefaultMaxIdleConns},
+		{"http.client.maxIdleConnsPerHost", DefaultMaxIdleConnsPerHost},
+		{"http.client.idleConnTimeout", DefaultHTTPIdleConnTimeout},
+		{"logging.level", DefaultLogLevel},
+		{"logging.encoding", DefaultLogEncoding},
+		{"logging.outputPath", DefaultLogOutput},
+		{"metrics.enabled", true},
+		{"metrics.address", DefaultMetricsAddress},
+		{"metrics.path", DefaultMetricsPath},
+		{"metrics.updateInterval", "15s"},
+		{"rules.kvBucket", "rules"},
+		{"security.verification.publicKeyHeader", DefaultPublicKeyHeader},
+		{"security.verification.signatureHeader", DefaultSignatureHeader},
+		{"forEach.maxIterations", DefaultForEachMaxIterations},
+		{"gateway.enabled", false},
+		{"authManager.enabled", false},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := tt.initial
-			setDefaults(&cfg)
-			tt.validate(t, &cfg)
-		})
+	for _, c := range checks {
+		got := v.Get(c.key)
+		if got != c.want {
+			t.Errorf("key %q = %v (%T), want %v (%T)", c.key, got, got, c.want, c.want)
+		}
+	}
+
+	urls := v.GetStringSlice("nats.urls")
+	if len(urls) != 1 || urls[0] != DefaultNATSURL {
+		t.Errorf("nats.urls = %v, want [%s]", urls, DefaultNATSURL)
 	}
 }
 
-func TestValidateConfig(t *testing.T) {
-	// Helper to create a minimal valid config
-	validConfig := func() *Config {
-		cfg := &Config{}
-		setDefaults(cfg)
-		return cfg
-	}
+func TestApplyConditionalDefaults(t *testing.T) {
+	t.Run("KV local cache enabled when KV enabled", func(t *testing.T) {
+		cfg := &Config{KV: KVConfig{Enabled: true}}
+		applyConditionalDefaults(cfg)
+		if !cfg.KV.LocalCache.Enabled {
+			t.Error("KV.LocalCache.Enabled should be true when KV is enabled")
+		}
+	})
 
+	t.Run("KV local cache unchanged when KV disabled", func(t *testing.T) {
+		cfg := &Config{KV: KVConfig{Enabled: false}}
+		applyConditionalDefaults(cfg)
+		if cfg.KV.LocalCache.Enabled {
+			t.Error("KV.LocalCache.Enabled should remain false when KV is disabled")
+		}
+	})
+
+	t.Run("AuthManager storage bucket defaulted when enabled", func(t *testing.T) {
+		cfg := &Config{AuthManager: AuthManagerConfig{Enabled: true}}
+		applyConditionalDefaults(cfg)
+		if cfg.AuthManager.Storage.Bucket != "tokens" {
+			t.Errorf("AuthManager.Storage.Bucket = %s, want tokens", cfg.AuthManager.Storage.Bucket)
+		}
+	})
+
+	t.Run("AuthManager storage bucket preserved when set", func(t *testing.T) {
+		cfg := &Config{AuthManager: AuthManagerConfig{
+			Enabled: true,
+			Storage: AuthManagerStorage{Bucket: "custom"},
+		}}
+		applyConditionalDefaults(cfg)
+		if cfg.AuthManager.Storage.Bucket != "custom" {
+			t.Errorf("AuthManager.Storage.Bucket = %s, want custom", cfg.AuthManager.Storage.Bucket)
+		}
+	})
+}
+
+// validConfig creates a minimal valid config by loading defaults through viper,
+// matching how Load() works in production.
+func validConfig() *Config {
+	v := viper.New()
+	setViperDefaults(v)
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		panic("failed to unmarshal defaults: " + err.Error())
+	}
+	applyConditionalDefaults(&cfg)
+	return &cfg
+}
+
+func TestValidateConfig(t *testing.T) {
 	tests := []struct {
 		name    string
 		modify  func(*Config)
@@ -446,7 +347,6 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid deliver policies",
 			modify: func(cfg *Config) {
-				// Test all valid deliver policies
 				for _, policy := range []string{"all", "new", "last", "by_start_time", "by_start_sequence"} {
 					cfg.NATS.Consumers.DeliverPolicy = policy
 				}
@@ -483,7 +383,7 @@ func TestValidateConfig(t *testing.T) {
 			} else {
 				if err == nil {
 					t.Errorf("validateConfig() expected error containing %q, got nil", tt.wantErr)
-				} else if !contains(err.Error(), tt.wantErr) {
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("validateConfig() error = %q, want error containing %q", err.Error(), tt.wantErr)
 				}
 			}
@@ -491,17 +391,143 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-// contains checks if s contains substr
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
+func TestValidateConfigTLSFileExistence(t *testing.T) {
+	t.Run("TLS cert file does not exist", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.NATS.TLS.Enable = true
+		cfg.NATS.TLS.CertFile = "/nonexistent/cert.pem"
+		cfg.NATS.TLS.KeyFile = "/nonexistent/key.pem"
+
+		err := validateConfig(cfg)
+		if err == nil || !strings.Contains(err.Error(), "NATS TLS cert file does not exist") {
+			t.Errorf("expected cert file not exist error, got: %v", err)
+		}
+	})
+
+	t.Run("TLS key file does not exist", func(t *testing.T) {
+		certFile := filepath.Join(t.TempDir(), "cert.pem")
+		os.WriteFile(certFile, []byte("cert"), 0o600)
+
+		cfg := validConfig()
+		cfg.NATS.TLS.Enable = true
+		cfg.NATS.TLS.CertFile = certFile
+		cfg.NATS.TLS.KeyFile = "/nonexistent/key.pem"
+
+		err := validateConfig(cfg)
+		if err == nil || !strings.Contains(err.Error(), "NATS TLS key file does not exist") {
+			t.Errorf("expected key file not exist error, got: %v", err)
+		}
+	})
+
+	t.Run("TLS CA file does not exist", func(t *testing.T) {
+		dir := t.TempDir()
+		certFile := filepath.Join(dir, "cert.pem")
+		keyFile := filepath.Join(dir, "key.pem")
+		os.WriteFile(certFile, []byte("cert"), 0o600)
+		os.WriteFile(keyFile, []byte("key"), 0o600)
+
+		cfg := validConfig()
+		cfg.NATS.TLS.Enable = true
+		cfg.NATS.TLS.CertFile = certFile
+		cfg.NATS.TLS.KeyFile = keyFile
+		cfg.NATS.TLS.CAFile = "/nonexistent/ca.pem"
+
+		err := validateConfig(cfg)
+		if err == nil || !strings.Contains(err.Error(), "NATS TLS CA file does not exist") {
+			t.Errorf("expected CA file not exist error, got: %v", err)
+		}
+	})
+
+	t.Run("TLS all files exist passes validation", func(t *testing.T) {
+		dir := t.TempDir()
+		certFile := filepath.Join(dir, "cert.pem")
+		keyFile := filepath.Join(dir, "key.pem")
+		caFile := filepath.Join(dir, "ca.pem")
+		os.WriteFile(certFile, []byte("cert"), 0o600)
+		os.WriteFile(keyFile, []byte("key"), 0o600)
+		os.WriteFile(caFile, []byte("ca"), 0o600)
+
+		cfg := validConfig()
+		cfg.NATS.TLS.Enable = true
+		cfg.NATS.TLS.CertFile = certFile
+		cfg.NATS.TLS.KeyFile = keyFile
+		cfg.NATS.TLS.CAFile = caFile
+
+		err := validateConfig(cfg)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }
 
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func TestLoadWithEnvOverrides(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	os.WriteFile(yamlPath, []byte(`
+nats:
+  tls:
+    enable: true
+logging:
+  level: warn
+`), 0o600)
+
+	t.Setenv("SHUNT_NATS_TLS_ENABLE", "false")
+	t.Setenv("SHUNT_LOGGING_LEVEL", "debug")
+
+	cfg, err := Load(yamlPath, nil)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
 	}
-	return false
+
+	if cfg.NATS.TLS.Enable {
+		t.Error("expected SHUNT_NATS_TLS_ENABLE=false to override yaml tls.enable=true")
+	}
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("expected SHUNT_LOGGING_LEVEL=debug to override yaml level=warn, got %s", cfg.Logging.Level)
+	}
+}
+
+func TestLoadWithViperOverrides(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	os.WriteFile(yamlPath, []byte(`
+logging:
+  level: warn
+`), 0o600)
+
+	v := viper.New()
+	v.Set("logging.level", "debug")
+
+	cfg, err := Load(yamlPath, v)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("expected viper.Set to override file value, got %s", cfg.Logging.Level)
+	}
+}
+
+func TestLoadDefaultsWithoutConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	os.WriteFile(yamlPath, []byte("{}"), 0o600)
+
+	cfg, err := Load(yamlPath, nil)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if len(cfg.NATS.URLs) != 1 || cfg.NATS.URLs[0] != DefaultNATSURL {
+		t.Errorf("NATS URLs = %v, want [%s]", cfg.NATS.URLs, DefaultNATSURL)
+	}
+	if cfg.Logging.Level != DefaultLogLevel {
+		t.Errorf("Logging.Level = %s, want %s", cfg.Logging.Level, DefaultLogLevel)
+	}
+	if cfg.NATS.Consumers.WorkerCount != DefaultWorkerCount {
+		t.Errorf("WorkerCount = %d, want %d", cfg.NATS.Consumers.WorkerCount, DefaultWorkerCount)
+	}
+	if !cfg.Metrics.Enabled {
+		t.Error("Metrics.Enabled should default to true")
+	}
 }

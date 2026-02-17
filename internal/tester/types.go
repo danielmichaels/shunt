@@ -5,7 +5,7 @@ package tester
 import (
 	"encoding/json"
 
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/internal/rule"
 )
 
 // TestConfig holds optional test-specific configurations.

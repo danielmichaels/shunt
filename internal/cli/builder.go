@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"gopkg.in/yaml.v3"
 )
 

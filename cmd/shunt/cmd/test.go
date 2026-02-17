@@ -1,4 +1,4 @@
-// file: cmd/rule-cli/cmd/test.go
+// file: cmd/shunt/cmd/test.go
 package cmd
 
 import (
@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/tester"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/tester"
 	"github.com/spf13/cobra"
 )
 

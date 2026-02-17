@@ -5,15 +5,16 @@ package broker
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/config"
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/metrics"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/rule"
 	json "github.com/goccy/go-json"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -516,10 +517,9 @@ func (b *NATSBroker) initializeNATSConnection() error {
 	return nil
 }
 
-// initializeKVStores connects to configured KV buckets
+// initializeKVStores connects to configured KV buckets, optionally creating missing ones
 func (b *NATSBroker) initializeKVStores(ctx context.Context) error {
-	// Change the log message to reflect the new behavior
-	b.logger.Info("validating configured KV stores are available", "buckets", b.config.KV.Buckets)
+	b.logger.Info("initializing configured KV stores", "buckets", b.config.KV.Buckets, "autoProvision", b.config.KV.AutoProvision)
 
 	for _, bucketName := range b.config.KV.Buckets {
 		b.logger.Debug("connecting to KV bucket", "bucket", bucketName)
@@ -529,25 +529,31 @@ func (b *NATSBroker) initializeKVStores(ctx context.Context) error {
 		cancel()
 
 		if err != nil {
+			if errors.Is(err, jetstream.ErrBucketNotFound) {
+				if !b.config.KV.AutoProvision {
+					return fmt.Errorf(
+						"configured KV bucket not found: '%s'. Create it with 'nats kv add %s' or enable kv.autoProvision",
+						bucketName, bucketName,
+					)
+				}
 
-			if err == jetstream.ErrBucketNotFound {
-				// FAIL FAST: The bucket does not exist. Return a user-friendly error.
-				return fmt.Errorf(
-					"configured KV bucket not found: '%s'. Please create it before starting the application using 'nats kv add %s'",
-					bucketName,
-					bucketName,
-				)
+				createCtx, createCancel := context.WithTimeout(ctx, kvOperationTimeout)
+				kv, err = b.jetStream.CreateKeyValue(createCtx, jetstream.KeyValueConfig{Bucket: bucketName})
+				createCancel()
+				if err != nil {
+					return fmt.Errorf("failed to auto-create KV bucket '%s': %w", bucketName, err)
+				}
+				b.logger.Info("auto-provisioned KV bucket", "bucket", bucketName)
+			} else {
+				return fmt.Errorf("failed to access KV bucket '%s': %w", bucketName, err)
 			}
-			// For all other errors (permissions, connection issues), fail as before.
-			return fmt.Errorf("failed to access KV bucket '%s': %w", bucketName, err)
-
 		}
 
 		b.kvStores[bucketName] = kv
 		b.logger.Debug("successfully connected to KV bucket", "bucket", bucketName)
 	}
 
-	b.logger.Info("all configured KV stores validated successfully", "bucketCount", len(b.kvStores))
+	b.logger.Info("all configured KV stores initialized", "bucketCount", len(b.kvStores))
 	return nil
 }
 

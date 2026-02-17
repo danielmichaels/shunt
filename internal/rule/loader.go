@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 	"gopkg.in/yaml.v3"
 )
 

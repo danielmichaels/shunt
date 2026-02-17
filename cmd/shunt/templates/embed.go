@@ -1,4 +1,4 @@
-// file: cmd/rule-cli/templates/embed.go
+// file: cmd/shunt/templates/embed.go
 package templates
 
 import "embed"

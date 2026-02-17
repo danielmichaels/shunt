@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/config"
-	"github.com/danielmichaels/rule-engine/internal/authmgr"
-	"github.com/danielmichaels/rule-engine/internal/authmgr/providers"
-	"github.com/danielmichaels/rule-engine/internal/broker"
-	"github.com/danielmichaels/rule-engine/internal/gateway"
-	"github.com/danielmichaels/rule-engine/internal/lifecycle"
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/metrics"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/authmgr"
+	"github.com/danielmichaels/shunt/internal/authmgr/providers"
+	"github.com/danielmichaels/shunt/internal/broker"
+	"github.com/danielmichaels/shunt/internal/gateway"
+	"github.com/danielmichaels/shunt/internal/lifecycle"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/rule"
 )
 
 // Timeout constants for RouterApp operations
@@ -33,7 +33,7 @@ const (
 // Verify RouterApp implements lifecycle.Application interface at compile time
 var _ lifecycle.Application = (*RouterApp)(nil)
 
-// RouterApp represents the rule-router application with all its components including KV support
+// RouterApp represents the shunt application with all its components including KV support
 type RouterApp struct {
 	config           *config.Config
 	logger           *logger.Logger
@@ -50,7 +50,7 @@ type RouterApp struct {
 	authNATSClient *authmgr.NATSClient
 }
 
-// NewRouterApp creates a new rule-router application instance using the pre-built base components.
+// NewRouterApp creates a new shunt application instance using the pre-built base components.
 func NewRouterApp(base *BaseApp, cfg *config.Config) (*RouterApp, error) {
 	app := &RouterApp{
 		config:           cfg,
@@ -73,7 +73,7 @@ func NewRouterApp(base *BaseApp, cfg *config.Config) (*RouterApp, error) {
 	return app, nil
 }
 
-// NewKVRouterApp creates a rule-router application that uses KV Watch for rule management.
+// NewKVRouterApp creates a shunt application that uses KV Watch for rule management.
 // Unlike NewRouterApp, it does not call setupSubscriptions — KV Watch manages subscriptions at runtime.
 func NewKVRouterApp(base *BaseApp, cfg *config.Config) *RouterApp {
 	app := &RouterApp{
@@ -107,7 +107,7 @@ func (app *RouterApp) Run(ctx context.Context) error {
 }
 
 func (app *RouterApp) runKVMode(ctx context.Context) error {
-	app.logger.Info("starting rule-router in KV mode",
+	app.logger.Info("starting shunt in KV mode",
 		"kvBucket", app.config.Rules.KVBucket,
 		"natsUrls", app.config.NATS.URLs)
 
@@ -267,8 +267,9 @@ func (app *RouterApp) startAuthManager() error {
 	natsClient, err := authmgr.NewNATSClientFromConn(
 		app.broker.GetNATSConn(),
 		&authmgr.StorageConfig{
-			Bucket:    app.config.AuthManager.Storage.Bucket,
-			KeyPrefix: app.config.AuthManager.Storage.KeyPrefix,
+			Bucket:        app.config.AuthManager.Storage.Bucket,
+			KeyPrefix:     app.config.AuthManager.Storage.KeyPrefix,
+			AutoProvision: app.config.KV.AutoProvision,
 		},
 		app.logger,
 	)
@@ -354,7 +355,7 @@ func (app *RouterApp) runFileMode(ctx context.Context) error {
 		"publishMode", app.config.NATS.Publish.Mode,
 		"workerCount", app.config.NATS.Consumers.WorkerCount)
 
-	app.logger.Info("starting rule-router with NATS JetStream",
+	app.logger.Info("starting shunt with NATS JetStream",
 		"natsUrls", app.config.NATS.URLs,
 		"subscriptionCount", subCount,
 		"metricsEnabled", app.config.Metrics.Enabled)

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/metrics"
 )
 
 // Clock skew tolerance for "recent" operator

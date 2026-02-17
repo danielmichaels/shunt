@@ -18,10 +18,10 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/danielmichaels/rule-engine/config"
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/metrics"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/rule"
 )
 
 // Client limits and timeout constants
@@ -403,7 +403,7 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg) 
 			}
 		} else if action.NATS != nil {
 			// NATS actions not typical in outbound, but log if present
-			c.logger.Debug("NATS action in outbound rule - consider using rule-router instead",
+			c.logger.Debug("NATS action in outbound rule - consider using shunt instead",
 				"subject", action.NATS.Subject)
 		}
 	}

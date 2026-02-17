@@ -1,4 +1,4 @@
-# Nested Field Access Examples for rule-router
+# Nested Field Access Examples for shunt
 # Demonstrates consistent nested field support in both conditions and templates
 
 # Example 1: IoT Sensor Data with Nested Structure

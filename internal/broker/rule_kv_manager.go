@@ -2,44 +2,48 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 type RuleKVManager struct {
-	kvBucket     string
-	processor    *rule.Processor
-	broker       *NATSBroker
-	rulesLoader  *rule.RulesLoader
-	logger       *logger.Logger
-	currentRules map[string][]rule.Rule
-	mu           sync.Mutex
-	ready        chan struct{}
-	readyOnce    sync.Once
-	watcher      jetstream.KeyWatcher
-	watchOnce    sync.Once
-	watchErr     error
+	kvBucket      string
+	autoProvision bool
+	processor     *rule.Processor
+	broker        *NATSBroker
+	rulesLoader   *rule.RulesLoader
+	logger        *logger.Logger
+	currentRules  map[string][]rule.Rule
+	mu            sync.Mutex
+	ready         chan struct{}
+	readyOnce     sync.Once
+	watcher       jetstream.KeyWatcher
+	watchOnce     sync.Once
+	watchErr      error
 }
 
 func NewRuleKVManager(
 	kvBucket string,
+	autoProvision bool,
 	processor *rule.Processor,
 	broker *NATSBroker,
 	rulesLoader *rule.RulesLoader,
 	log *logger.Logger,
 ) *RuleKVManager {
 	return &RuleKVManager{
-		kvBucket:     kvBucket,
-		processor:    processor,
-		broker:       broker,
-		rulesLoader:  rulesLoader,
-		logger:       log,
-		currentRules: make(map[string][]rule.Rule),
-		ready:        make(chan struct{}),
+		kvBucket:      kvBucket,
+		autoProvision: autoProvision,
+		processor:     processor,
+		broker:        broker,
+		rulesLoader:   rulesLoader,
+		logger:        log,
+		currentRules:  make(map[string][]rule.Rule),
+		ready:         make(chan struct{}),
 	}
 }
 
@@ -49,8 +53,17 @@ func (m *RuleKVManager) Watch(ctx context.Context) error {
 
 		store, err := js.KeyValue(ctx, m.kvBucket)
 		if err != nil {
-			m.watchErr = fmt.Errorf("failed to open KV bucket %q: %w", m.kvBucket, err)
-			return
+			if errors.Is(err, jetstream.ErrBucketNotFound) && m.autoProvision {
+				store, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: m.kvBucket})
+				if err != nil {
+					m.watchErr = fmt.Errorf("failed to auto-create rules KV bucket %q: %w", m.kvBucket, err)
+					return
+				}
+				m.logger.Info("auto-provisioned rules KV bucket", "bucket", m.kvBucket)
+			} else {
+				m.watchErr = fmt.Errorf("failed to open KV bucket %q: %w", m.kvBucket, err)
+				return
+			}
 		}
 
 		watcher, err := store.WatchAll(ctx)

@@ -5,7 +5,7 @@ package tester
 import (
 	"testing"
 
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/internal/rule"
 )
 
 func TestExtractKVBucket(t *testing.T) {

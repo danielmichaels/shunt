@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
+	"github.com/danielmichaels/shunt/internal/logger"
 )
 
 // Run runs an application with SIGTERM/SIGINT handling only (no SIGHUP reload).
-// Used by rule-router in KV mode where rule changes are picked up live via KV Watch.
+// Used by shunt in KV mode where rule changes are picked up live via KV Watch.
 func Run(
 	createApp func() (Application, error),
 	log *logger.Logger,

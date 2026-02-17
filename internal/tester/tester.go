@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielmichaels/rule-engine/internal/logger"
-	"github.com/danielmichaels/rule-engine/internal/rule"
+	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"gopkg.in/yaml.v3"
 )
 
@@ -176,7 +176,7 @@ func (t *Tester) Scaffold(rulePath string, noOverwrite bool) error {
 	fmt.Println("Next steps:")
 	fmt.Println("  1. Edit the JSON files with your actual test data")
 	fmt.Println("  2. Update match_1_output.json with expected actions")
-	fmt.Println("  3. Run: rule-cli test --rules ./rules")
+	fmt.Println("  3. Run: shunt test --rules ./rules")
 
 	// Provide helpful tips based on features
 	t.printScaffoldTips(features)
