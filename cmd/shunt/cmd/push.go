@@ -55,6 +55,7 @@ var pushCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), kvOperationTimeout)
 		defer cancel()
 
+		bucket, _ := cmd.Flags().GetString("bucket")
 		pushed := 0
 		for _, f := range files {
 			data, err := os.ReadFile(f)
@@ -73,12 +74,12 @@ var pushCmd = &cobra.Command{
 				}
 			}
 
-			key := sanitizeKVKey(filepath.Base(f))
+			key := deriveKVKey(f, bucket)
 			if _, err := kv.Put(ctx, key, data); err != nil {
 				return fmt.Errorf("failed to put key '%s': %w", key, err)
 			}
 
-			fmt.Fprintf(os.Stderr, "pushed %s → %s (%d rules)\n", filepath.Base(f), key, len(rules))
+			fmt.Fprintf(os.Stderr, "pushed %s → %s (%d rules)\n", f, key, len(rules))
 			pushed++
 		}
 

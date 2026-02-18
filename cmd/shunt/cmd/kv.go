@@ -144,3 +144,8 @@ func sanitizeKVKey(filename string) string {
 	key = strings.ReplaceAll(key, "\\", ".")
 	return key
 }
+
+func deriveKVKey(filePath, bucket string) string {
+	key := sanitizeKVKey(filePath)
+	return strings.TrimPrefix(key, bucket+".")
+}
