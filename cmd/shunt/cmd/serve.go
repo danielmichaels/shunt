@@ -70,7 +70,7 @@ Optional subsystems (gateway, auth manager) can be enabled via configuration.`,
 }
 
 func init() {
-	serveCmd.Flags().String("config", "config/shunt.yaml", "path to config file (YAML or JSON)")
+	serveCmd.Flags().String("config", "config/shunt.yaml", "path to config file (YAML or JSON, optional — env vars work without it)")
 	serveCmd.Flags().String("rules", "rules", "path to rules directory")
 	serveCmd.Flags().StringSlice("nats-urls", nil, "NATS server URLs to override config (repeatable or comma-separated)")
 	serveCmd.Flags().Bool("metrics-enabled", true, "override enabling of metrics server")

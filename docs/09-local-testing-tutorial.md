@@ -340,7 +340,7 @@ nats kv put device_config sensor-42 '{
 export SHUNT_KV_BUCKETS="customer_data,device_config,system_config,feature_flags"
 ```
 
-Or update `config/shunt.yaml` to list these buckets, then restart Shunt.
+Or create a `config/shunt.yaml` (see `config/shunt.yaml.example` for reference) listing these buckets, then restart Shunt.
 
 ### Push rules + restart
 ```bash
@@ -525,4 +525,4 @@ curl -X POST http://localhost:8080/webhooks/generic \
 
 **KV enrichment returning empty:** Ensure the KV data bucket is listed in config (`kv.buckets`) and Shunt was restarted after adding it.
 
-**Port mismatch:** Default config uses port `4442`. Override with `--nats-urls nats://localhost:4222` or edit `config/shunt.yaml`.
+**Port mismatch:** Default config uses port `4442`. Override with `--nats-urls nats://localhost:4222` or create a `config/shunt.yaml` with the correct URL.

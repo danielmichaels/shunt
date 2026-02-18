@@ -69,15 +69,18 @@ docker run --rm \
   --config /config.yaml
 ```
 
+A reference config with all available options and documentation is provided at `config/shunt.yaml.example`. Copy and customize it as needed.
+
 ## Configuration in Containers
 
-All configuration keys can be set via environment variables with the `SHUNT_` prefix. Nested keys use `_` as a separator.
+Every scalar config key can be set via environment variables with the `SHUNT_` prefix. Nested keys use `_` as a separator. No config file is required — shunt starts with sane defaults and gracefully handles a missing file.
 
 | Config Key | Env Var | Example |
 |---|---|---|
 | `nats.urls` | `SHUNT_NATS_URLS` | `nats://nats:4222` |
 | `nats.credsFile` | `SHUNT_NATS_CREDSFILE` | `/etc/nats/creds/user.creds` |
-| `nats.consumers.workerCount` | `SHUNT_NATS_CONSUMERS_WORKERCOUNT` | `4` |
+| `nats.consumers.workerCount` | `SHUNT_NATS_CONSUMERS_WORKERCOUNT` | `8` |
+| `nats.consumers.fetchBatchSize` | `SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE` | `64` |
 | `logging.level` | `SHUNT_LOGGING_LEVEL` | `debug` |
 | `metrics.enabled` | `SHUNT_METRICS_ENABLED` | `true` |
 | `metrics.address` | `SHUNT_METRICS_ADDRESS` | `:2112` |
@@ -87,6 +90,27 @@ All configuration keys can be set via environment variables with the `SHUNT_` pr
 `SHUNT_NATS_URLS` accepts a comma-separated string for multiple servers (e.g. `nats://s1:4222,nats://s2:4222`).
 
 List values like `kv.buckets` cannot be set via a single env var — use a config file for those.
+
+### Defaults vs Production Tuning
+
+The built-in defaults are conservative. For production workloads, consider overriding the following via env vars:
+
+| Setting | Default | Recommended | Env Var |
+|---|---|---|---|
+| `nats.consumers.workerCount` | `2` | `8` (2-4x CPU cores) | `SHUNT_NATS_CONSUMERS_WORKERCOUNT` |
+| `nats.consumers.fetchBatchSize` | `1` | `64` (higher throughput) | `SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE` |
+| `kv.enabled` | `false` | `true` if using KV enrichment | `SHUNT_KV_ENABLED` |
+| `gateway.enabled` | `false` | `true` for HTTP ingest | `SHUNT_GATEWAY_ENABLED` |
+| `security.verification.enabled` | `false` | `true` for signed messages | `SHUNT_SECURITY_VERIFICATION_ENABLED` |
+
+### When You Need a Config File
+
+A config file is only required for values that cannot be expressed as a single env var:
+
+- **`kv.buckets`** — list of KV bucket names to watch for enrichment data
+- **`authManager.providers`** — OAuth/HTTP provider definitions
+
+For everything else, env vars are sufficient.
 
 See [Configuration Reference](./07-configuration.md) for the complete list of all settings.
 
@@ -132,6 +156,132 @@ readinessProbe:
 ```
 
 The metrics endpoint is available when `metrics.enabled` is `true` (the default).
+
+## Kubernetes Deployment
+
+### Env-Var-Only (No Config File)
+
+The simplest deployment uses only env vars. This works for any setup that doesn't require KV enrichment or auth providers:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shunt
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shunt
+  template:
+    metadata:
+      labels:
+        app: shunt
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2112"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: shunt
+          image: ghcr.io/danielmichaels/shunt:latest
+          ports:
+            - containerPort: 8080
+              name: gateway
+            - containerPort: 2112
+              name: metrics
+          env:
+            - name: SHUNT_NATS_URLS
+              value: "nats://nats:4222"
+            - name: SHUNT_GATEWAY_ENABLED
+              value: "true"
+            - name: SHUNT_METRICS_ENABLED
+              value: "true"
+            - name: SHUNT_NATS_CONSUMERS_WORKERCOUNT
+              value: "8"
+            - name: SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE
+              value: "64"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+```
+
+### With Credentials File
+
+For NATS JWT authentication, mount a `.creds` file from a Secret:
+
+```yaml
+env:
+  - name: SHUNT_NATS_CREDSFILE
+    value: "/etc/nats/creds/shunt.creds"
+volumeMounts:
+  - name: nats-creds
+    mountPath: /etc/nats/creds
+    readOnly: true
+# ...
+volumes:
+  - name: nats-creds
+    secret:
+      secretName: shunt-nats-creds
+```
+
+Create the Secret from your `.creds` file:
+
+```bash
+kubectl create secret generic shunt-nats-creds \
+  --from-file=shunt.creds=/path/to/shunt.creds
+```
+
+### With Config File (KV Enrichment)
+
+If you use KV enrichment, `kv.buckets` requires a config file since lists cannot be set via a single env var. Mount a ConfigMap:
+
+```yaml
+env:
+  - name: SHUNT_NATS_URLS
+    value: "nats://nats:4222"
+  - name: SHUNT_GATEWAY_ENABLED
+    value: "true"
+  - name: SHUNT_NATS_CONSUMERS_WORKERCOUNT
+    value: "8"
+  - name: SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE
+    value: "64"
+args: ["serve", "--config", "/etc/shunt/shunt.yaml"]
+volumeMounts:
+  - name: config
+    mountPath: /etc/shunt
+    readOnly: true
+# ...
+volumes:
+  - name: config
+    configMap:
+      name: shunt-config
+```
+
+The ConfigMap only needs the fields that require YAML — env vars still override everything else:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shunt-config
+data:
+  shunt.yaml: |
+    kv:
+      enabled: true
+      buckets:
+        - "device_status"
+        - "feature_flags"
+```
 
 ## Prometheus Metrics
 
