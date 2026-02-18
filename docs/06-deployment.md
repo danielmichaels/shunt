@@ -157,3 +157,116 @@ initContainers:
 ```
 
 The `2>/dev/null || true` pattern makes the commands idempotent — they succeed whether the resource already exists or is newly created.
+
+## Rule Management
+
+Rules are standalone YAML files, decoupled from the shunt server binary. The server watches the NATS KV `rules` bucket and hot-reloads on any change — you never restart shunt to deploy new routing logic. This makes rules ideal for a GitOps workflow: author rules in version control, validate in CI, and push to NATS KV on merge.
+
+### Separate Rules Repository
+
+Rules don't need to live in the same repository as your shunt deployment. A dedicated rules repo keeps routing logic independent and lets domain teams own their rules without access to infrastructure code.
+
+```
+my-rules-repo/
+├── sensors/
+│   ├── tank.yaml
+│   └── temperature.yaml
+├── alerts/
+│   └── critical.yaml
+├── webhooks/
+│   └── github.yaml
+└── README.md
+```
+
+### KV Key Derivation
+
+When `shunt kv push` uploads a file, the file path determines the KV key:
+
+1. Strip the `.yaml` or `.yml` extension
+2. Replace path separators (`/`, `\`) with `.`
+3. Strip the bucket name prefix (default: `rules.`)
+
+Examples:
+
+| File Path | KV Key |
+|---|---|
+| `routing.yaml` | `routing` |
+| `sensors/tank.yaml` | `sensors.tank` |
+| `alerts/critical.yaml` | `alerts.critical` |
+
+This means your directory structure maps directly to a dotted namespace in the KV store.
+
+### Directory Push Behavior
+
+`shunt kv push <dir>` pushes all `*.yaml` and `*.yml` files in the given directory but **does not recurse into subdirectories**. To push a nested structure, push each directory separately:
+
+```bash
+shunt kv push sensors/   --nats-url $NATS_URL
+shunt kv push alerts/    --nats-url $NATS_URL
+shunt kv push webhooks/  --nats-url $NATS_URL
+```
+
+Or push individual files directly:
+
+```bash
+shunt kv push sensors/tank.yaml --nats-url $NATS_URL
+```
+
+### CI/CD Pipeline
+
+A typical pipeline validates rules before pushing them to NATS KV. Run `lint` and `test` on every PR, and `kv push` only on merge to your main branch.
+
+```yaml
+# Example GitHub Actions workflow
+name: rules
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shunt
+        run: go install github.com/danielmichaels/shunt/cmd/shunt@latest
+
+      - name: Lint rules
+        run: shunt lint sensors/ alerts/ webhooks/
+
+      - name: Run rule tests
+        run: shunt test sensors/ alerts/ webhooks/
+
+  push:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shunt
+        run: go install github.com/danielmichaels/shunt/cmd/shunt@latest
+
+      - name: Push rules to NATS KV
+        run: |
+          shunt kv push sensors/   --nats-url ${{ secrets.NATS_URL }} --creds ${{ secrets.NATS_CREDS_PATH }}
+          shunt kv push alerts/    --nats-url ${{ secrets.NATS_URL }} --creds ${{ secrets.NATS_CREDS_PATH }}
+          shunt kv push webhooks/  --nats-url ${{ secrets.NATS_URL }} --creds ${{ secrets.NATS_CREDS_PATH }}
+```
+
+### Multi-Environment Strategy
+
+Use separate KV buckets or NATS clusters per environment:
+
+- **Separate buckets**: Push to `rules-staging` and `rules-production` buckets in the same cluster. Configure shunt with `rules.kvBucket` (or `SHUNT_RULES_KVBUCKET`) per environment.
+- **Separate clusters**: Push to entirely different NATS clusters per environment using `--nats-url` targeting each cluster.
+
+```bash
+# Push to staging
+shunt kv push sensors/ --nats-url $NATS_STAGING --bucket rules-staging
+
+# Push to production (after staging validation)
+shunt kv push sensors/ --nats-url $NATS_PRODUCTION --bucket rules-production
+```
