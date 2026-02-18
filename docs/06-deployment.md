@@ -92,10 +92,31 @@ See [Configuration Reference](./07-configuration.md) for the complete list of al
 
 ## Health Checks
 
-Shunt does not expose a dedicated `/healthz` endpoint. Use the Prometheus metrics endpoint for liveness probes:
+When the HTTP gateway is enabled (`gateway.enabled: true`), Shunt exposes dedicated health endpoints on the gateway port:
+
+- `GET /healthz` — returns `200 OK` when the server is running
+- `GET /health` — same behavior, alternate path
 
 ```yaml
-# Kubernetes probe example
+# Kubernetes probe example (gateway enabled)
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+If the gateway is **not** enabled, use the Prometheus metrics endpoint instead:
+
+```yaml
+# Kubernetes probe example (gateway disabled)
 livenessProbe:
   httpGet:
     path: /metrics
@@ -110,7 +131,7 @@ readinessProbe:
   periodSeconds: 10
 ```
 
-The metrics endpoint is available when `metrics.enabled` is `true` (the default via `--metrics-enabled` flag).
+The metrics endpoint is available when `metrics.enabled` is `true` (the default).
 
 ## Prometheus Metrics
 
