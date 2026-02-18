@@ -68,6 +68,9 @@ tasks:
 
   dev:
     desc: Run shunt with hot-reloading (air)
+    env:
+      SHUNT_LOGGING_LEVEL: info
+      SHUNT_LOGGING_ENCODING: console
     cmds:
       - air
 

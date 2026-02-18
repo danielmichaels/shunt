@@ -1,4 +1,3 @@
-// file: cmd/shunt/cmd/lint.go
 package cmd
 
 import (
