@@ -1,4 +1,3 @@
-// file: cmd/shunt/cmd/new.go
 package cmd
 
 import (
@@ -51,7 +50,6 @@ through an interactive prompt.`,
 				return fmt.Errorf("interactive build failed: %w", err)
 			}
 		} else {
-			// Template-based creation
 			content, err := renderer.GetTemplateContent(templateName)
 			if err != nil {
 				return err
@@ -69,7 +67,6 @@ through an interactive prompt.`,
 		// Ensure .yaml extension and place in 'rules' dir if appropriate
 		output = normalizeOutputPath(output)
 
-		// Write the file
 		if err := writeFileWithConfirm(output, ruleBytes); err != nil {
 			// If writeFileWithConfirm returns nil, it means the user cancelled, so we should exit gracefully.
 			if err.Error() == "cancelled" {

@@ -4,6 +4,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+var ErrNoStreamFound = errors.New("no stream found")
 
 // Timeout constants for stream resolver operations
 const (
@@ -233,8 +236,8 @@ func (sr *StreamResolver) FindStreamForSubject(subject string) (string, error) {
 	if len(matches) == 0 {
 		// No stream found
 		availableFilters := sr.getAllSubjectFilters()
-		return "", fmt.Errorf("no stream found for subject '%s' - available stream filters: %v",
-			subject, availableFilters)
+		return "", fmt.Errorf("%w for subject '%s' - available stream filters: %v",
+			ErrNoStreamFound, subject, availableFilters)
 	}
 
 	// If only one stream matches, no need to sort.

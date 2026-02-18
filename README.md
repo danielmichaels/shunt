@@ -28,6 +28,8 @@ Single binary with subcommands:
 *   **`shunt lint`** / `test` / `check` — Validate rules offline.
 *   **`shunt new`** / `scaffold` — Generate rule templates.
 
+Rules can be managed in a separate Git repository and deployed via CI/CD — see [Rule Management](./docs/06-deployment.md#rule-management) in the deployment guide.
+
 ## Quick Start
 
 ### Prerequisites

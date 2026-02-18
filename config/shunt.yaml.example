@@ -5,14 +5,14 @@
 nats:
   # Connection URLs - supports multiple servers for high availability
   urls:
-#    - nats://nats-server-1:4222
-#    - nats://nats-server-2:4222
-    - nats://localhost:4442
-  
+    - nats://nats-1:4222
+    - nats://nats-2:4222
+    - nats://nats-3:4222
+
   # Authentication Options (choose one)
   # Option 1: Username/Password
-#  username: "shunt-service"
-#  password: "secure-password"
+  # username: "shunt-service"
+  # password: "secure-password"
   
   # Option 2: Token Authentication
   # token: "your-nats-token"
@@ -25,7 +25,7 @@ nats:
   
   # TLS Configuration
   tls:
-    enable: false
+    enable: true
     certFile: "/etc/ssl/nats/client-cert.pem"
     keyFile: "/etc/ssl/nats/client-key.pem"
     caFile: "/etc/ssl/nats/ca.pem"

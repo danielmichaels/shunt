@@ -1,4 +1,3 @@
-// file: cmd/shunt/cmd/check.go
 package cmd
 
 import (

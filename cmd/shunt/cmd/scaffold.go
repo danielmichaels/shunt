@@ -1,4 +1,3 @@
-// file: cmd/shunt/cmd/scaffold.go
 package cmd
 
 import (

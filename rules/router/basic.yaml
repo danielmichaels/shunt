@@ -6,10 +6,10 @@
   conditions:
     operator: and
     items:
-      - field: "{sensor.reading}"             # ✅ Nested field access in conditions
+      - field: "{sensor.reading}"
         operator: gt
         value: 30
-      - field: "{sensor.location}"            # ✅ Nested string field
+      - field: "{sensor.location}"
         operator: eq
         value: "bedroom"
   action:
@@ -18,9 +18,9 @@
       payload: |
         {
           "alert": "High bedroom temperature!",
-          "sensor_id": {sensor.id},         # ✅ Nested field in template
-          "reading": {sensor.reading},      # ✅ Nested numeric field  
-          "location": {sensor.location},    # ✅ Nested string field
+          "sensor_id": {sensor.id},
+          "reading": {sensor.reading},
+          "location": {sensor.location},
           "timestamp": "{@timestamp()}",
           "alertId": "{@uuid7()}"
         }

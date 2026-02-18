@@ -1,4 +1,3 @@
-// file: cmd/shunt/templates/embed.go
 package templates
 
 import "embed"

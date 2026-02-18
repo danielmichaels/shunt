@@ -12,22 +12,18 @@ import (
 )
 
 var pushCmd = &cobra.Command{
-	Use:   "push <file|dir>",
-	Short: "Validate and push rules into a NATS KV bucket",
-	Args:  cobra.ExactArgs(1),
+	Use:     "push <file|dir>",
+	Aliases: []string{"put"},
+	Short:   "Validate and push rules into a NATS KV bucket",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
-		nc, err := connectNATS(cmd)
+		nc, kv, err := connectToNATS(cmd)
 		if err != nil {
 			return err
 		}
 		defer nc.Close()
-
-		kv, err := openKVBucket(cmd, nc)
-		if err != nil {
-			return err
-		}
 
 		log := logger.NewNopLogger()
 		loader := rule.NewRulesLoader(log, nil)
@@ -59,6 +55,7 @@ var pushCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), kvOperationTimeout)
 		defer cancel()
 
+		bucket, _ := cmd.Flags().GetString("bucket")
 		pushed := 0
 		for _, f := range files {
 			data, err := os.ReadFile(f)
@@ -77,16 +74,16 @@ var pushCmd = &cobra.Command{
 				}
 			}
 
-			key := sanitizeKVKey(filepath.Base(f))
+			key := deriveKVKey(f, bucket)
 			if _, err := kv.Put(ctx, key, data); err != nil {
 				return fmt.Errorf("failed to put key '%s': %w", key, err)
 			}
 
-			fmt.Printf("  pushed %s → %s (%d rules)\n", filepath.Base(f), key, len(rules))
+			fmt.Fprintf(os.Stderr, "pushed %s → %s (%d rules)\n", f, key, len(rules))
 			pushed++
 		}
 
-		fmt.Printf("\n%d files pushed successfully\n", pushed)
+		fmt.Fprintf(os.Stderr, "\n%d files pushed successfully\n", pushed)
 		return nil
 	},
 }
