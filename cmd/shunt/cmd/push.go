@@ -12,22 +12,18 @@ import (
 )
 
 var pushCmd = &cobra.Command{
-	Use:   "push <file|dir>",
-	Short: "Validate and push rules into a NATS KV bucket",
-	Args:  cobra.ExactArgs(1),
+	Use:     "push <file|dir>",
+	Aliases: []string{"put"},
+	Short:   "Validate and push rules into a NATS KV bucket",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
-		nc, err := connectNATS(cmd)
+		nc, kv, err := connectToNATS(cmd)
 		if err != nil {
 			return err
 		}
 		defer nc.Close()
-
-		kv, err := openKVBucket(cmd, nc)
-		if err != nil {
-			return err
-		}
 
 		log := logger.NewNopLogger()
 		loader := rule.NewRulesLoader(log, nil)
@@ -82,11 +78,11 @@ var pushCmd = &cobra.Command{
 				return fmt.Errorf("failed to put key '%s': %w", key, err)
 			}
 
-			fmt.Printf("  pushed %s → %s (%d rules)\n", filepath.Base(f), key, len(rules))
+			fmt.Fprintf(os.Stderr, "pushed %s → %s (%d rules)\n", filepath.Base(f), key, len(rules))
 			pushed++
 		}
 
-		fmt.Printf("\n%d files pushed successfully\n", pushed)
+		fmt.Fprintf(os.Stderr, "\n%d files pushed successfully\n", pushed)
 		return nil
 	},
 }

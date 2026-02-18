@@ -2,11 +2,14 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/briandowns/spinner"
+	"github.com/mattn/go-isatty"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/spf13/cobra"
@@ -76,13 +79,58 @@ func openKVBucket(cmd *cobra.Command, nc *nats.Conn) (jetstream.KeyValue, error)
 
 	kv, err := js.KeyValue(ctx, bucket)
 	if err != nil {
-		if err == jetstream.ErrBucketNotFound {
+		if errors.Is(err, jetstream.ErrBucketNotFound) {
 			return nil, fmt.Errorf("KV bucket '%s' not found. Create it with: nats kv add %s", bucket, bucket)
 		}
 		return nil, fmt.Errorf("failed to open KV bucket '%s': %w", bucket, err)
 	}
 
 	return kv, nil
+}
+
+func connectToNATS(cmd *cobra.Command) (*nats.Conn, jetstream.KeyValue, error) {
+	s := newSpinner("Connecting to NATS...")
+	spinStart(s)
+
+	nc, err := connectNATS(cmd)
+	if err != nil {
+		spinStop(s)
+		return nil, nil, err
+	}
+
+	if s != nil {
+		s.Suffix = " Getting KV bucket..."
+	}
+	kv, err := openKVBucket(cmd, nc)
+	if err != nil {
+		spinStop(s)
+		nc.Close()
+		return nil, nil, err
+	}
+
+	spinStop(s)
+	return nc, kv, nil
+}
+
+func newSpinner(suffix string) *spinner.Spinner {
+	if !isatty.IsTerminal(os.Stderr.Fd()) && !isatty.IsCygwinTerminal(os.Stderr.Fd()) {
+		return nil
+	}
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
+	s.Suffix = " " + suffix
+	return s
+}
+
+func spinStart(s *spinner.Spinner) {
+	if s != nil {
+		s.Start()
+	}
+}
+
+func spinStop(s *spinner.Spinner) {
+	if s != nil {
+		s.Stop()
+	}
 }
 
 func lookupEnv(key string) string {

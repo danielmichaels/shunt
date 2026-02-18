@@ -139,8 +139,14 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 	for subject := range newSubjects {
 		if !previousSubjects[subject] {
 			if err := m.broker.AddAndStartSubscription(subject); err != nil {
-				m.logger.Error("failed to start subscription for new subject",
-					"key", key, "subject", subject, "error", err)
+				if errors.Is(err, ErrNoStreamFound) {
+					m.logger.Warn("rule references subject with no JetStream stream, skipping subscription",
+						"key", key, "subject", subject,
+						"hint", "create a stream covering this subject or remove the rule")
+				} else {
+					m.logger.Error("failed to start subscription for new subject",
+						"key", key, "subject", subject, "error", err)
+				}
 			}
 		}
 	}

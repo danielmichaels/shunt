@@ -2,38 +2,50 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var pullCmd = &cobra.Command{
-	Use:   "pull [key]",
-	Short: "Download rules from a NATS KV bucket to local YAML files",
+	Use:     "pull [key]",
+	Aliases: []string{"get"},
+	Short:   "Download rules from a NATS KV bucket to local YAML files",
 	Long: `Pull downloads rules from the KV bucket. If a key is specified, only that rule is
-downloaded. Otherwise all rules in the bucket are downloaded.`,
+downloaded. Otherwise all rules in the bucket are downloaded.
+
+Use -f yaml or -f json to print rules to stdout instead of saving to files.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		outDir, _ := cmd.Flags().GetString("output")
+		format, _ := cmd.Flags().GetString("format")
 
-		nc, err := connectNATS(cmd)
+		if format != "" {
+			format = strings.ToLower(format)
+			if format != "yaml" && format != "json" {
+				return fmt.Errorf("unsupported format %q (use yaml or json)", format)
+			}
+		}
+
+		nc, kv, err := connectToNATS(cmd)
 		if err != nil {
 			return err
 		}
 		defer nc.Close()
 
-		kv, err := openKVBucket(cmd, nc)
-		if err != nil {
-			return err
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), kvOperationTimeout)
 		defer cancel()
 
-		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create output directory: %w", err)
+		if format == "" {
+			if err := os.MkdirAll(outDir, 0o755); err != nil {
+				return fmt.Errorf("failed to create output directory: %w", err)
+			}
 		}
 
 		if len(args) == 1 {
@@ -42,12 +54,15 @@ downloaded. Otherwise all rules in the bucket are downloaded.`,
 			if err != nil {
 				return fmt.Errorf("failed to get key '%s': %w", key, err)
 			}
+			if format != "" {
+				return printRule(entry.Value(), format)
+			}
 			filename := key + ".yaml"
 			outPath := filepath.Join(outDir, filename)
 			if err := os.WriteFile(outPath, entry.Value(), 0o644); err != nil {
 				return fmt.Errorf("failed to write %s: %w", outPath, err)
 			}
-			fmt.Printf("  pulled %s → %s\n", key, outPath)
+			fmt.Fprintf(os.Stderr, "  pulled %s → %s\n", key, outPath)
 			return nil
 		}
 
@@ -63,20 +78,79 @@ downloaded. Otherwise all rules in the bucket are downloaded.`,
 				fmt.Fprintf(os.Stderr, "  warning: failed to get key '%s': %v\n", key, err)
 				continue
 			}
+			if format != "" {
+				if pulled > 0 {
+					fmt.Println()
+				}
+				if err := printRule(entry.Value(), format); err != nil {
+					return err
+				}
+				pulled++
+				continue
+			}
 			filename := key + ".yaml"
 			outPath := filepath.Join(outDir, filename)
 			if err := os.WriteFile(outPath, entry.Value(), 0o644); err != nil {
 				return fmt.Errorf("failed to write %s: %w", outPath, err)
 			}
-			fmt.Printf("  pulled %s → %s\n", key, outPath)
+			fmt.Fprintf(os.Stderr, "  pulled %s → %s\n", key, outPath)
 			pulled++
 		}
 
-		fmt.Printf("\n%d rules pulled to %s\n", pulled, outDir)
+		if format == "" {
+			fmt.Fprintf(os.Stderr, "\n%d rules pulled to %s\n", pulled, outDir)
+		}
 		return nil
 	},
 }
 
+func printRule(data []byte, format string) error {
+	if format == FormatJSON {
+		var raw any
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			return fmt.Errorf("failed to parse YAML: %w", err)
+		}
+		raw = inlineJSONStrings(raw)
+		return printJSON(os.Stdout, raw)
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+var bareTemplateVarRe = regexp.MustCompile(`:\s*(\{[\w.@()]+\})\s*([,}\n])`)
+
+func inlineJSONStrings(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		for k, child := range val {
+			val[k] = inlineJSONStrings(child)
+		}
+		return val
+	case []any:
+		for i, child := range val {
+			val[i] = inlineJSONStrings(child)
+		}
+		return val
+	case string:
+		s := strings.TrimSpace(val)
+		if (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) ||
+			(strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) {
+			var parsed any
+			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+				return parsed
+			}
+			quoted := bareTemplateVarRe.ReplaceAllString(s, `: "$1"$2`)
+			if err := json.Unmarshal([]byte(quoted), &parsed); err == nil {
+				return parsed
+			}
+		}
+		return val
+	default:
+		return val
+	}
+}
+
 func init() {
 	pullCmd.Flags().StringP("output", "o", ".", "Output directory for downloaded rule files")
+	pullCmd.Flags().StringP("format", "f", "", "Output format to stdout instead of files (yaml or json)")
 }
