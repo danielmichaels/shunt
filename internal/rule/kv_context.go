@@ -4,9 +4,11 @@ package rule
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	json "github.com/goccy/go-json"
 	"regexp"
+
+	json "github.com/goccy/go-json"
 	"strconv"
 	"strings"
 	"time"
@@ -172,7 +174,7 @@ func (kv *KVContext) getFromNATSKV(bucket, key string, jsonPath []string) (inter
 	// Perform the KV lookup
 	entry, err := store.Get(ctx, key)
 	if err != nil {
-		if err == jetstream.ErrKeyNotFound {
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
 			kv.logger.Warn("KV key does not exist in bucket",
 				"bucket", bucket,
 				"key", key,

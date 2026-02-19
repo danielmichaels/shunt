@@ -4,6 +4,11 @@ vars:
   BIN_DIR: ./bin
   LDFLAGS: -s -w
 
+env:
+  SHUNT_LOGGING_LEVEL: info
+  SHUNT_LOGGING_ENCODING: console
+  SHUNT_NATS_URLS: "nats://host.docker.internal:4442"
+
 tasks:
   default:
     silent: true
@@ -68,9 +73,6 @@ tasks:
 
   dev:
     desc: Run shunt with hot-reloading (air)
-    env:
-      SHUNT_LOGGING_LEVEL: info
-      SHUNT_LOGGING_ENCODING: console
     cmds:
       - air
 

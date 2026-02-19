@@ -4,7 +4,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -34,18 +36,16 @@ type BaseApp struct {
 
 // AppBuilder constructs the BaseApp components fluently.
 type AppBuilder struct {
-	cfg       *config.Config
-	rulesPath string
-	base      *BaseApp
-	err       error
+	cfg  *config.Config
+	base *BaseApp
+	err  error
 }
 
 // NewAppBuilder creates a new builder.
-func NewAppBuilder(cfg *config.Config, rulesPath string) *AppBuilder {
+func NewAppBuilder(cfg *config.Config) *AppBuilder {
 	return &AppBuilder{
-		cfg:       cfg,
-		rulesPath: rulesPath,
-		base:      &BaseApp{},
+		cfg:  cfg,
+		base: &BaseApp{},
 	}
 }
 
@@ -100,20 +100,26 @@ func (b *AppBuilder) WithMetrics() *AppBuilder {
 		Handler: mux,
 	}
 
-	// Track the metrics server goroutine with WaitGroup for graceful shutdown
+	// Bind listener synchronously so port conflicts fail the builder immediately
+	ln, err := net.Listen("tcp", b.cfg.Metrics.Address)
+	if err != nil {
+		b.err = fmt.Errorf("failed to bind metrics server on %s: %w", b.cfg.Metrics.Address, err)
+		return b
+	}
+
 	b.base.metricsServerWg.Add(1)
 	go func() {
 		defer b.base.metricsServerWg.Done()
 		b.base.Logger.Info("starting metrics server",
-			"address", b.cfg.Metrics.Address,
+			"address", ln.Addr().String(),
 			"path", b.cfg.Metrics.Path)
-		if err := b.base.MetricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := b.base.MetricsServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			b.base.Logger.Error("metrics server error", "error", err)
 		}
 	}()
 
 	b.base.Logger.Info("metrics initialized successfully",
-		"address", b.cfg.Metrics.Address,
+		"address", ln.Addr().String(),
 		"path", b.cfg.Metrics.Path,
 		"updateInterval", updateInterval)
 
@@ -142,63 +148,6 @@ func (b *AppBuilder) WithNATSBroker() *AppBuilder {
 			b.base.Logger.Info("local KV cache initialized successfully")
 		}
 	}
-	return b
-}
-
-// WithRuleProcessor loads rules and creates the rule processor.
-func (b *AppBuilder) WithRuleProcessor() *AppBuilder {
-	if b.err != nil {
-		return b
-	}
-
-	kvBuckets := []string{}
-	if b.cfg.KV.Enabled {
-		kvBuckets = b.cfg.KV.Buckets
-	}
-
-	rulesLoader := rule.NewRulesLoader(b.base.Logger, kvBuckets)
-	rules, err := rulesLoader.LoadFromDirectory(b.rulesPath)
-	if err != nil {
-		b.err = fmt.Errorf("failed to load rules: %w", err)
-		return b
-	}
-
-	var kvContext *rule.KVContext
-	if b.cfg.KV.Enabled && b.base.Broker != nil {
-		kvStores := b.base.Broker.GetKVStores()
-		localKVCache := b.base.Broker.GetLocalKVCache()
-		kvContext = rule.NewKVContext(kvStores, b.base.Logger, localKVCache)
-	}
-
-	var sigVerification *rule.SignatureVerification
-	if b.cfg.Security.Verification.Enabled {
-		sigVerification = rule.NewSignatureVerification(
-			b.cfg.Security.Verification.Enabled,
-			b.cfg.Security.Verification.PublicKeyHeader,
-			b.cfg.Security.Verification.SignatureHeader,
-		)
-	}
-
-	b.base.Processor = rule.NewProcessor(b.base.Logger, b.base.Metrics, kvContext, sigVerification)
-
-	// Configure forEach iteration limit
-	b.base.Processor.SetMaxForEachIterations(b.cfg.ForEach.MaxIterations)
-
-	// Wire up metrics to evaluator for array operator tracking
-	if b.base.Metrics != nil {
-		// The evaluator needs access to metrics for array operator tracking
-		// This is done internally when evaluator is created within processor
-	}
-
-	if err := b.base.Processor.LoadRules(rules); err != nil {
-		b.err = fmt.Errorf("failed to load rules into processor: %w", err)
-		return b
-	}
-
-	b.base.Logger.Info("rules loaded successfully",
-		"totalRules", len(rules),
-		"maxForEachIterations", b.cfg.ForEach.MaxIterations)
-
 	return b
 }
 

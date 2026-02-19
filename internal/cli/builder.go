@@ -1,4 +1,3 @@
-// file: internal/cli/builder.go
 package cli
 
 import (

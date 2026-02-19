@@ -17,8 +17,8 @@ nats:
   # Option 2: Token Authentication
   # token: "your-nats-token"
   
-  # Option 3: NKey Authentication  
-  # nkey: "your-nkey-here"
+  # Option 3: NKey Authentication (path to seed file)
+  # nkey: "/etc/nats/nkey/user.seed"
   
   # Option 4: JWT with .creds file (recommended for production)
   # credsFile: "/etc/nats/creds/shunt.creds"

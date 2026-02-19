@@ -4,7 +4,6 @@ package broker
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/natsutil"
 	"github.com/danielmichaels/shunt/internal/rule"
 	json "github.com/goccy/go-json"
 	"github.com/nats-io/nats.go"
@@ -58,7 +58,8 @@ type NATSBroker struct {
 	subscriptionMgr *SubscriptionManager
 
 	// Consumer management - track created consumers
-	consumers map[string]string // subject -> consumer name
+	consumersMu sync.RWMutex
+	consumers   map[string]string // subject -> consumer name
 
 	// Context for managing watchers and long-running operations
 	ctx    context.Context
@@ -132,7 +133,10 @@ func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
 	b.logger.Debug("creating consumer for subject", "subject", subject)
 
 	// Check if consumer already exists for this subject
-	if existingConsumer, exists := b.consumers[subject]; exists {
+	b.consumersMu.RLock()
+	existingConsumer, exists := b.consumers[subject]
+	b.consumersMu.RUnlock()
+	if exists {
 		b.logger.Debug("consumer already exists for subject",
 			"subject", subject,
 			"consumer", existingConsumer)
@@ -183,7 +187,9 @@ func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
 	}
 
 	// Track the consumer
+	b.consumersMu.Lock()
 	b.consumers[subject] = consumerName
+	b.consumersMu.Unlock()
 
 	// Get consumer info for logging
 	info, _ := consumer.Info(ctx)
@@ -241,7 +247,9 @@ func (b *NATSBroker) AddSubscription(subject string) error {
 	}
 
 	// Get consumer name
+	b.consumersMu.RLock()
 	consumerName, exists := b.consumers[subject]
+	b.consumersMu.RUnlock()
 	if !exists {
 		return fmt.Errorf("consumer not created for subject '%s'", subject)
 	}
@@ -273,7 +281,9 @@ func (b *NATSBroker) AddAndStartSubscription(subject string) error {
 		return fmt.Errorf("failed to create consumer for '%s': %w", subject, err)
 	}
 
+	b.consumersMu.RLock()
 	consumerName, exists := b.consumers[subject]
+	b.consumersMu.RUnlock()
 	if !exists {
 		return fmt.Errorf("consumer not found after creation for subject '%s'", subject)
 	}
@@ -295,7 +305,9 @@ func (b *NATSBroker) RemoveSubscription(subject string) {
 	}
 
 	b.subscriptionMgr.RemoveSubscription(subject)
+	b.consumersMu.Lock()
 	delete(b.consumers, subject)
+	b.consumersMu.Unlock()
 
 	b.logger.Info("subscription and consumer tracking removed", "subject", subject)
 }
@@ -586,43 +598,22 @@ func (b *NATSBroker) buildNATSOptions() ([]nats.Option, error) {
 		nats.ReconnectJitter(reconnectJitterMin, reconnectJitterMax),
 	)
 
-	if b.config.NATS.CredsFile != "" {
-		b.logger.Info("using NATS JWT authentication with creds file", "credsFile", b.config.NATS.CredsFile)
-		natsOptions = append(natsOptions, nats.UserCredentials(b.config.NATS.CredsFile))
-	} else if b.config.NATS.NKey != "" {
-		b.logger.Info("using NATS NKey authentication")
-		natsOptions = append(natsOptions, nats.Nkey(b.config.NATS.NKey, nil))
-	} else if b.config.NATS.Token != "" {
-		b.logger.Info("using NATS token authentication")
-		natsOptions = append(natsOptions, nats.Token(b.config.NATS.Token))
-	} else if b.config.NATS.Username != "" {
-		b.logger.Info("using NATS username/password authentication", "username", b.config.NATS.Username)
-		natsOptions = append(natsOptions, nats.UserInfo(b.config.NATS.Username, b.config.NATS.Password))
+	authTLSOpts, err := natsutil.BuildAuthTLSOptions(natsutil.AuthTLSConfig{
+		CredsFile:   b.config.NATS.CredsFile,
+		NKey:        b.config.NATS.NKey,
+		Token:       b.config.NATS.Token,
+		Username:    b.config.NATS.Username,
+		Password:    b.config.NATS.Password,
+		TLSEnable:   b.config.NATS.TLS.Enable,
+		TLSCertFile: b.config.NATS.TLS.CertFile,
+		TLSKeyFile:  b.config.NATS.TLS.KeyFile,
+		TLSCAFile:   b.config.NATS.TLS.CAFile,
+		TLSInsecure: b.config.NATS.TLS.Insecure,
+	}, b.logger)
+	if err != nil {
+		return nil, err
 	}
-
-	if b.config.NATS.TLS.Enable {
-		b.logger.Info("enabling TLS for NATS connection", "insecure", b.config.NATS.TLS.Insecure)
-
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: b.config.NATS.TLS.Insecure,
-		}
-
-		if b.config.NATS.TLS.CertFile != "" && b.config.NATS.TLS.KeyFile != "" {
-			cert, err := tls.LoadX509KeyPair(b.config.NATS.TLS.CertFile, b.config.NATS.TLS.KeyFile)
-			if err != nil {
-				return nil, fmt.Errorf("failed to load NATS TLS client certificate: %w", err)
-			}
-			tlsConfig.Certificates = []tls.Certificate{cert}
-			b.logger.Info("loaded NATS TLS client certificate", "certFile", b.config.NATS.TLS.CertFile)
-		}
-
-		if b.config.NATS.TLS.CAFile != "" {
-			natsOptions = append(natsOptions, nats.RootCAs(b.config.NATS.TLS.CAFile))
-			b.logger.Info("loaded NATS TLS CA certificate", "caFile", b.config.NATS.TLS.CAFile)
-		}
-
-		natsOptions = append(natsOptions, nats.Secure(tlsConfig))
-	}
+	natsOptions = append(natsOptions, authTLSOpts...)
 
 	return natsOptions, nil
 }
@@ -666,7 +657,10 @@ func (b *NATSBroker) GetNATSConn() *nats.Conn {
 
 // GetConsumerName returns the consumer name for a subject
 func (b *NATSBroker) GetConsumerName(subject string) string {
-	if name, exists := b.consumers[subject]; exists {
+	b.consumersMu.RLock()
+	name, exists := b.consumers[subject]
+	b.consumersMu.RUnlock()
+	if exists {
 		return name
 	}
 	return b.generateConsumerName(subject)
@@ -709,7 +703,10 @@ func (b *NATSBroker) Close() error {
 		b.logger.Warn("timeout waiting for KV watcher goroutines to stop")
 	}
 
-	b.logger.Info("durable consumers remain in NATS for next startup", "consumerCount", len(b.consumers))
+	b.consumersMu.RLock()
+	consumerCount := len(b.consumers)
+	b.consumersMu.RUnlock()
+	b.logger.Info("durable consumers remain in NATS for next startup", "consumerCount", consumerCount)
 
 	if b.natsConn != nil {
 		b.logger.Info("draining NATS connection (publishing pending messages)")

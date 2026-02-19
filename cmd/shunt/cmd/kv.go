@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielmichaels/shunt/internal/natsutil"
+
 	"github.com/briandowns/spinner"
 	"github.com/mattn/go-isatty"
 	"github.com/nats-io/nats.go"
@@ -51,11 +53,12 @@ func connectNATS(cmd *cobra.Command) (*nats.Conn, error) {
 		nkey = envNKey
 	}
 
-	var opts []nats.Option
-	if creds != "" {
-		opts = append(opts, nats.UserCredentials(creds))
-	} else if nkey != "" {
-		opts = append(opts, nats.Nkey(nkey, nil))
+	opts, err := natsutil.BuildAuthTLSOptions(natsutil.AuthTLSConfig{
+		CredsFile: creds,
+		NKey:      nkey,
+	}, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	nc, err := nats.Connect(natsURL, opts...)

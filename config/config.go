@@ -517,6 +517,12 @@ func validateConfig(cfg *Config) error {
 		}
 	}
 
+	if cfg.NATS.NKey != "" {
+		if _, err := os.Stat(cfg.NATS.NKey); errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("NATS NKey seed file does not exist: %s", cfg.NATS.NKey)
+		}
+	}
+
 	// Consumer validation with bounds checking
 	if cfg.NATS.Consumers.WorkerCount < 1 {
 		return fmt.Errorf("worker count must be at least 1")

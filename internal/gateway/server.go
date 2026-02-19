@@ -4,9 +4,12 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -150,15 +153,20 @@ func (s *InboundServer) Start(ctx context.Context) error {
 	// Start the fixed-size pool of worker goroutines.
 	s.startWorkers(ctx)
 
-	// Start server in goroutine
-	go func() {
-		s.logger.Info("starting HTTP inbound server",
-			"address", s.serverCfg.Address,
-			"paths", len(paths),
-			"workers", s.serverCfg.InboundWorkerCount,
-			"queueSize", s.serverCfg.InboundQueueSize)
+	// Bind the listener synchronously so port conflicts fail Start() immediately
+	ln, err := net.Listen("tcp", s.serverCfg.Address)
+	if err != nil {
+		return fmt.Errorf("failed to bind HTTP inbound server on %s: %w", s.serverCfg.Address, err)
+	}
 
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	s.logger.Info("starting HTTP inbound server",
+		"address", ln.Addr().String(),
+		"paths", len(paths),
+		"workers", s.serverCfg.InboundWorkerCount,
+		"queueSize", s.serverCfg.InboundQueueSize)
+
+	go func() {
+		if err := s.httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Error("HTTP server error", "error", err)
 		}
 	}()
@@ -183,11 +191,10 @@ func (s *InboundServer) startWorkers(ctx context.Context) {
 					return
 				case job, ok := <-s.workQueue:
 					if !ok {
-						// Channel closed - no more jobs will arrive
 						s.logger.Info("inbound worker stopped", "workerID", workerID)
 						return
 					}
-					s.processWebhook(job.path, job.method, job.body, job.headers)
+					s.processWebhookWithRecovery(workerID, job)
 				}
 			}
 		}()
@@ -288,6 +295,25 @@ func (s *InboundServer) webhookHandler(path string) http.HandlerFunc {
 			s.metrics.ObserveHTTPRequestDuration(path, r.Method, time.Since(start).Seconds())
 		}
 	}
+}
+
+func (s *InboundServer) processWebhookWithRecovery(workerID int, job webhookJob) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic recovered in inbound worker",
+				"panic", r,
+				"workerID", workerID,
+				"path", job.path,
+				"method", job.method,
+				"stack", string(debug.Stack()))
+
+			if s.metrics != nil {
+				s.metrics.IncHTTPInboundRequestsTotal(job.path, job.method, "500")
+			}
+		}
+	}()
+
+	s.processWebhook(job.path, job.method, job.body, job.headers)
 }
 
 // processWebhook processes the webhook and publishes to NATS
