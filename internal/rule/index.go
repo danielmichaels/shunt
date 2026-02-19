@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 )
 
 // RuleIndex provides efficient rule lookup for NATS subjects
@@ -17,7 +17,7 @@ type RuleIndex struct {
 	patternRules []*PatternRule     // rules with wildcards
 	stats        IndexStats
 	mu           sync.RWMutex
-	logger       *logger.Logger
+	logger       *slog.Logger
 }
 
 // PatternRule wraps a rule with its compiled pattern matcher
@@ -35,7 +35,7 @@ type IndexStats struct {
 }
 
 // NewRuleIndex creates a new rule index
-func NewRuleIndex(log *logger.Logger) *RuleIndex {
+func NewRuleIndex(log *slog.Logger) *RuleIndex {
 	return &RuleIndex{
 		exactMatches: make(map[string][]*Rule),
 		patternRules: make([]*PatternRule, 0),

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/rule"
 	"gopkg.in/yaml.v3"
@@ -18,13 +20,13 @@ import (
 
 // Tester holds the configuration and logic for the rule-tester utility.
 type Tester struct {
-	Logger          *logger.Logger
+	Logger          *slog.Logger
 	Verbose         bool
 	ParallelWorkers int
 }
 
 // New creates a new Tester instance.
-func New(log *logger.Logger, verbose bool, parallel int) *Tester {
+func New(log *slog.Logger, verbose bool, parallel int) *Tester {
 	return &Tester{
 		Logger:          log,
 		Verbose:         verbose,

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/broker"
 	"github.com/danielmichaels/shunt/internal/logger"
@@ -22,7 +24,7 @@ import (
 
 // BaseApp holds the common, initialized components for any application.
 type BaseApp struct {
-	Logger        *logger.Logger
+	Logger        *slog.Logger
 	Metrics       *metrics.Metrics
 	Broker        *broker.NATSBroker
 	Processor     *rule.Processor

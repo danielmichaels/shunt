@@ -3,7 +3,7 @@
 package rule
 
 import (
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 	"sync"
 )
 
@@ -12,12 +12,12 @@ import (
 type LocalKVCache struct {
 	cache   map[string]map[string]interface{} // bucket -> key -> parsed JSON value
 	mu      sync.RWMutex                      // Simple read-write mutex for concurrent access
-	logger  *logger.Logger                    // For debugging and monitoring
+	logger  *slog.Logger                    // For debugging and monitoring
 	enabled bool                              // Feature flag for easy disable
 }
 
 // NewLocalKVCache creates a new local KV cache instance
-func NewLocalKVCache(logger *logger.Logger) *LocalKVCache {
+func NewLocalKVCache(logger *slog.Logger) *LocalKVCache {
 	if logger == nil {
 		// Defensive programming - should never happen but be safe
 		panic("LocalKVCache requires a logger")

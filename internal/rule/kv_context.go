@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -32,13 +32,13 @@ var (
 // Now includes local cache support for improved performance
 type KVContext struct {
 	stores     map[string]jetstream.KeyValue
-	logger     *logger.Logger
+	logger     *slog.Logger
 	localCache *LocalKVCache      // Local cache for performance optimization
 	traverser  *JSONPathTraverser // Shared JSON path traversal
 }
 
 // NewKVContext creates a new KV context with the provided KV stores and optional local cache
-func NewKVContext(stores map[string]jetstream.KeyValue, logger *logger.Logger, localCache *LocalKVCache) *KVContext {
+func NewKVContext(stores map[string]jetstream.KeyValue, logger *slog.Logger, localCache *LocalKVCache) *KVContext {
 	if logger == nil {
 		// This should never happen in practice, but be defensive
 		panic("KVContext requires a logger")

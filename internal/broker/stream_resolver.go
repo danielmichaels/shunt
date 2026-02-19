@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -27,7 +27,7 @@ const (
 type StreamResolver struct {
 	jetStream  jetstream.JetStream
 	streams    []StreamInfo
-	logger     *logger.Logger
+	logger     *slog.Logger
 	discovered bool
 }
 
@@ -55,7 +55,7 @@ type streamMatch struct {
 }
 
 // NewStreamResolver creates a new stream resolver
-func NewStreamResolver(js jetstream.JetStream, logger *logger.Logger) *StreamResolver {
+func NewStreamResolver(js jetstream.JetStream, logger *slog.Logger) *StreamResolver {
 	return &StreamResolver{
 		jetStream:  js,
 		streams:    make([]StreamInfo, 0),

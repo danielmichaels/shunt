@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -17,7 +17,7 @@ type RuleKVManager struct {
 	processor     *rule.Processor
 	broker        *NATSBroker
 	rulesLoader   *rule.RulesLoader
-	logger        *logger.Logger
+	logger        *slog.Logger
 	currentRules  map[string][]rule.Rule
 	mu            sync.Mutex
 	ready         chan struct{}
@@ -33,7 +33,7 @@ func NewRuleKVManager(
 	processor *rule.Processor,
 	broker *NATSBroker,
 	rulesLoader *rule.RulesLoader,
-	log *logger.Logger,
+	log *slog.Logger,
 ) *RuleKVManager {
 	return &RuleKVManager{
 		kvBucket:      kvBucket,

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/danielmichaels/shunt/config"
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/natsutil"
 	"github.com/danielmichaels/shunt/internal/rule"
@@ -37,7 +37,7 @@ const (
 
 // NATSBroker connects to external NATS JetStream servers with KV support and local caching
 type NATSBroker struct {
-	logger  *logger.Logger
+	logger  *slog.Logger
 	metrics *metrics.Metrics
 	config  *config.Config
 
@@ -67,7 +67,7 @@ type NATSBroker struct {
 }
 
 // NewNATSBroker creates a new NATS broker that connects to external NATS servers
-func NewNATSBroker(cfg *config.Config, log *logger.Logger, metrics *metrics.Metrics) (*NATSBroker, error) {
+func NewNATSBroker(cfg *config.Config, log *slog.Logger, metrics *metrics.Metrics) (*NATSBroker, error) {
 	// Create cancellable context for broker lifecycle management
 	ctx, cancel := context.WithCancel(context.Background())
 

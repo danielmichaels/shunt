@@ -11,7 +11,7 @@ import (
 	json "github.com/goccy/go-json"
 	"github.com/nats-io/nkeys"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 )
 
 // System field prefixes for @ variables
@@ -82,7 +82,7 @@ type EvaluationContext struct {
 	sigChecked      bool
 	sigValid        bool
 	signerPublicKey string
-	logger          *logger.Logger
+	logger          *slog.Logger
 }
 
 // NewEvaluationContext creates a new evaluation context
@@ -95,7 +95,7 @@ func NewEvaluationContext(
 	timeCtx *TimeContext,
 	kvCtx *KVContext,
 	sigVerification *SignatureVerification,
-	logger *logger.Logger,
+	logger *slog.Logger,
 ) (*EvaluationContext, error) {
 	// Parse payload as generic interface to handle all JSON types
 	var raw interface{}
