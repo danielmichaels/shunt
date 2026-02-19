@@ -27,9 +27,9 @@ Use push, pull, list, and delete to interact with the rule store.`,
 }
 
 func init() {
-	kvCmd.PersistentFlags().String("nats-url", "nats://localhost:4222", "NATS server URL (or set NATS_URL)")
-	kvCmd.PersistentFlags().String("creds", "", "Path to NATS credentials file (or set NATS_CREDS)")
-	kvCmd.PersistentFlags().String("nkey", "", "NATS NKey seed (or set NATS_NKEY)")
+	kvCmd.PersistentFlags().String("nats-url", natsutil.DefaultURL, "NATS server URL (or set SHUNT_NATS_URL / NATS_URL)")
+	kvCmd.PersistentFlags().String("creds", "", "Path to NATS credentials file (or set SHUNT_NATS_CREDS / NATS_CREDS)")
+	kvCmd.PersistentFlags().String("nkey", "", "NATS NKey seed (or set SHUNT_NATS_NKEY / NATS_NKEY)")
 	kvCmd.PersistentFlags().String("bucket", "rules", "KV bucket name")
 
 	kvCmd.AddCommand(pushCmd)
@@ -43,14 +43,20 @@ func connectNATS(cmd *cobra.Command) (*nats.Conn, error) {
 	creds, _ := cmd.Flags().GetString("creds")
 	nkey, _ := cmd.Flags().GetString("nkey")
 
-	if envURL := lookupEnv("NATS_URL"); envURL != "" && natsURL == "nats://localhost:4222" {
-		natsURL = envURL
+	if !cmd.Flags().Changed("nats-url") {
+		if v := natsutil.ResolveEnv("SHUNT_NATS_URL", "NATS_URL"); v != "" {
+			natsURL = v
+		}
 	}
-	if envCreds := lookupEnv("NATS_CREDS"); envCreds != "" && creds == "" {
-		creds = envCreds
+	if !cmd.Flags().Changed("creds") {
+		if v := natsutil.ResolveEnv("SHUNT_NATS_CREDS", "NATS_CREDS"); v != "" {
+			creds = v
+		}
 	}
-	if envNKey := lookupEnv("NATS_NKEY"); envNKey != "" && nkey == "" {
-		nkey = envNKey
+	if !cmd.Flags().Changed("nkey") {
+		if v := natsutil.ResolveEnv("SHUNT_NATS_NKEY", "NATS_NKEY"); v != "" {
+			nkey = v
+		}
 	}
 
 	opts, err := natsutil.BuildAuthTLSOptions(natsutil.AuthTLSConfig{
@@ -136,9 +142,6 @@ func spinStop(s *spinner.Spinner) {
 	}
 }
 
-func lookupEnv(key string) string {
-	return os.Getenv(key)
-}
 
 func sanitizeKVKey(filename string) string {
 	key := strings.TrimSuffix(filename, ".yaml")

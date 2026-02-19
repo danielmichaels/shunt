@@ -45,7 +45,7 @@ nats kv add rules
 ### Start Shunt (Terminal 3)
 ```bash
 SHUNT_LOGGING_LEVEL=debug SHUNT_LOGGING_ENCODING=console \
-  ./bin/shunt serve --nats-urls nats://localhost:4222
+  ./bin/shunt serve --nats-url nats://localhost:4222
 ```
 
 ### Subscribe to output (Terminal 4)
@@ -349,7 +349,7 @@ Or create a `config/shunt.yaml` (see `config/shunt.yaml.example` for reference) 
 # Restart shunt with the KV buckets configured
 SHUNT_LOGGING_LEVEL=debug SHUNT_LOGGING_ENCODING=console \
 SHUNT_KV_ENABLED=true SHUNT_KV_AUTOPROVISION=true \
-  ./bin/shunt serve --nats-urls nats://localhost:4222
+  ./bin/shunt serve --nats-url nats://localhost:4222
 ```
 
 ### Test KV-enriched routing
@@ -429,7 +429,7 @@ The HTTP gateway is an optional subsystem. Enable it:
 
 SHUNT_LOGGING_LEVEL=debug SHUNT_LOGGING_ENCODING=console \
 SHUNT_GATEWAY_ENABLED=true \
-  ./bin/shunt serve --nats-urls nats://localhost:4222
+  ./bin/shunt serve --nats-url nats://localhost:4222
 ```
 
 ### Subscribe to see inbound webhook results
@@ -525,4 +525,4 @@ curl -X POST http://localhost:8080/webhooks/generic \
 
 **KV enrichment returning empty:** Ensure the KV data bucket is listed in config (`kv.buckets`) and Shunt was restarted after adding it.
 
-**Port mismatch:** Default config uses port `4442`. Override with `--nats-urls nats://localhost:4222` or create a `config/shunt.yaml` with the correct URL.
+**Port mismatch:** Default config uses port `4442`. Override with `--nats-url nats://localhost:4222` or create a `config/shunt.yaml` with the correct URL.

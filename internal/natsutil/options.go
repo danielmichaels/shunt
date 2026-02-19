@@ -4,9 +4,22 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/nats-io/nats.go"
 )
+
+const DefaultURL = "nats://localhost:4222"
+
+// ResolveEnv returns the first non-empty value from SHUNT_-prefixed then
+// NATS_-prefixed environment variables. This ensures all CLI commands and
+// the server share identical env var precedence.
+func ResolveEnv(shuntVar, natsVar string) string {
+	if v := os.Getenv(shuntVar); v != "" {
+		return v
+	}
+	return os.Getenv(natsVar)
+}
 
 type StructuredLogger interface {
 	Info(msg string, args ...any)

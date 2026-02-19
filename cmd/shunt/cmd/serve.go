@@ -21,7 +21,7 @@ Optional subsystems (gateway, auth manager) can be enabled via configuration.`,
 		configPath, _ := cmd.Flags().GetString("config")
 
 		v := viper.New()
-		v.BindPFlag("nats.urls", cmd.Flags().Lookup("nats-urls"))
+		v.BindPFlag("nats.urls", cmd.Flags().Lookup("nats-url"))
 		v.BindPFlag("metrics.enabled", cmd.Flags().Lookup("metrics-enabled"))
 		v.BindPFlag("metrics.address", cmd.Flags().Lookup("metrics-addr"))
 		v.BindPFlag("metrics.path", cmd.Flags().Lookup("metrics-path"))
@@ -70,7 +70,7 @@ Optional subsystems (gateway, auth manager) can be enabled via configuration.`,
 
 func init() {
 	serveCmd.Flags().String("config", "config/shunt.yaml", "path to config file (YAML or JSON, optional — env vars work without it)")
-	serveCmd.Flags().StringSlice("nats-urls", nil, "NATS server URLs to override config (repeatable or comma-separated)")
+	serveCmd.Flags().StringSlice("nats-url", nil, "NATS server URLs to override config (repeatable or comma-separated)")
 	serveCmd.Flags().Bool("metrics-enabled", true, "override enabling of metrics server")
 	serveCmd.Flags().String("metrics-addr", "", "override metrics server address")
 	serveCmd.Flags().String("metrics-path", "", "override metrics endpoint path")

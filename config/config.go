@@ -336,6 +336,10 @@ func Load(path string, v *viper.Viper) (*Config, error) {
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	v.BindEnv("nats.urls", "SHUNT_NATS_URL")
+	v.BindEnv("nats.credsFile", "SHUNT_NATS_CREDS")
+	v.BindEnv("nats.nkey", "SHUNT_NATS_NKEY")
+
 	setViperDefaults(v)
 
 	if err := v.ReadInConfig(); err != nil {

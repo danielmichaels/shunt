@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -39,13 +40,12 @@ var listCmd = &cobra.Command{
 		defer cancel()
 
 		keys, err := kv.Keys(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to list keys: %w", err)
-		}
-
-		if len(keys) == 0 {
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
 			fmt.Fprintln(os.Stderr, "No rules found in bucket")
 			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to list keys: %w", err)
 		}
 
 		var entries []ruleListEntry

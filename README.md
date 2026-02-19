@@ -82,7 +82,7 @@ Write a rule file and push it to NATS KV:
 ### 4. Run
 
 ```bash
-./shunt serve --nats-urls nats://localhost:4222
+./shunt serve --nats-url nats://localhost:4222
 ```
 
 Or with env vars:
