@@ -4,6 +4,14 @@ vars:
   BIN_DIR: ./bin
   LDFLAGS: -s -w
 
+env:
+  SHUNT_LOGGING_LEVEL: info
+  SHUNT_LOGGING_ENCODING: console
+  SHUNT_NATS_URL: "nats://host.docker.internal:4442"
+  SHUNT_CONFIG_PATH: ./shunt.local.yaml
+
+silent: true
+
 tasks:
   default:
     silent: true
@@ -59,7 +67,7 @@ tasks:
     cmds:
       - docker build -t shunt .
 
-  run:shunt:
+  shunt:
     desc: Build and run shunt
     deps:
       - build:shunt
@@ -68,11 +76,15 @@ tasks:
 
   dev:
     desc: Run shunt with hot-reloading (air)
-    env:
-      SHUNT_LOGGING_LEVEL: info
-      SHUNT_LOGGING_ENCODING: console
     cmds:
       - air
+
+  nats:
+    desc: Run NATS cli
+    env:
+      NATS_URL: "{{.SHUNT_NATS_URL}}"
+    cmds:
+      - nats {{.CLI_ARGS}}
 
   clean:
     desc: Remove build artifacts

@@ -4,13 +4,13 @@ package authmgr
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/natsutil"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -165,11 +165,9 @@ func (c *NATSClient) Close() error {
 }
 
 // buildNATSOptions creates NATS connection options with auth and TLS
-// This function is adapted from broker package
 func buildNATSOptions(cfg *NATSConfig, log *logger.Logger) ([]nats.Option, error) {
 	var opts []nats.Option
 
-	// Connection handlers
 	opts = append(opts,
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
 			log.Warn("NATS disconnected", "error", err)
@@ -180,49 +178,26 @@ func buildNATSOptions(cfg *NATSConfig, log *logger.Logger) ([]nats.Option, error
 		nats.ClosedHandler(func(nc *nats.Conn) {
 			log.Error("NATS connection closed", "error", nc.LastError())
 		}),
-		nats.MaxReconnects(-1), // Unlimited reconnects
+		nats.MaxReconnects(-1),
 		nats.ReconnectWait(natsReconnectWait),
 	)
 
-	// Authentication (choose one method)
-	if cfg.CredsFile != "" {
-		log.Info("using NATS creds file authentication", "credsFile", cfg.CredsFile)
-		opts = append(opts, nats.UserCredentials(cfg.CredsFile))
-	} else if cfg.NKey != "" {
-		log.Info("using NATS NKey authentication")
-		opts = append(opts, nats.Nkey(cfg.NKey, nil))
-	} else if cfg.Token != "" {
-		log.Info("using NATS token authentication")
-		opts = append(opts, nats.Token(cfg.Token))
-	} else if cfg.Username != "" {
-		log.Info("using NATS username/password authentication", "username", cfg.Username)
-		opts = append(opts, nats.UserInfo(cfg.Username, cfg.Password))
+	authTLSOpts, err := natsutil.BuildAuthTLSOptions(natsutil.AuthTLSConfig{
+		CredsFile:   cfg.CredsFile,
+		NKey:        cfg.NKey,
+		Token:       cfg.Token,
+		Username:    cfg.Username,
+		Password:    cfg.Password,
+		TLSEnable:   cfg.TLS.Enable,
+		TLSCertFile: cfg.TLS.CertFile,
+		TLSKeyFile:  cfg.TLS.KeyFile,
+		TLSCAFile:   cfg.TLS.CAFile,
+		TLSInsecure: cfg.TLS.Insecure,
+	}, log)
+	if err != nil {
+		return nil, err
 	}
-
-	// TLS configuration
-	if cfg.TLS.Enable {
-		log.Info("enabling TLS", "insecure", cfg.TLS.Insecure)
-
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: cfg.TLS.Insecure,
-		}
-
-		if cfg.TLS.CertFile != "" && cfg.TLS.KeyFile != "" {
-			cert, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile)
-			if err != nil {
-				return nil, fmt.Errorf("failed to load TLS cert/key: %w", err)
-			}
-			tlsConfig.Certificates = []tls.Certificate{cert}
-			log.Info("loaded TLS client certificate", "certFile", cfg.TLS.CertFile)
-		}
-
-		if cfg.TLS.CAFile != "" {
-			opts = append(opts, nats.RootCAs(cfg.TLS.CAFile))
-			log.Info("loaded TLS CA certificate", "caFile", cfg.TLS.CAFile)
-		}
-
-		opts = append(opts, nats.Secure(tlsConfig))
-	}
+	opts = append(opts, authTLSOpts...)
 
 	return opts, nil
 }

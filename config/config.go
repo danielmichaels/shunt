@@ -336,6 +336,10 @@ func Load(path string, v *viper.Viper) (*Config, error) {
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	v.BindEnv("nats.urls", "SHUNT_NATS_URL")
+	v.BindEnv("nats.credsFile", "SHUNT_NATS_CREDS")
+	v.BindEnv("nats.nkey", "SHUNT_NATS_NKEY")
+
 	setViperDefaults(v)
 
 	if err := v.ReadInConfig(); err != nil {
@@ -514,6 +518,12 @@ func validateConfig(cfg *Config) error {
 	if cfg.NATS.CredsFile != "" {
 		if _, err := os.Stat(cfg.NATS.CredsFile); errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("NATS creds file does not exist: %s", cfg.NATS.CredsFile)
+		}
+	}
+
+	if cfg.NATS.NKey != "" {
+		if _, err := os.Stat(cfg.NATS.NKey); errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("NATS NKey seed file does not exist: %s", cfg.NATS.NKey)
 		}
 	}
 
