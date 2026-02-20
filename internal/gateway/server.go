@@ -17,6 +17,8 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"log/slog"
+
+	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
 )
@@ -140,10 +142,14 @@ func (s *InboundServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/healthz", s.healthHandler)
 
-	// Create HTTP server
+	handler := logger.RequestLogger(s.logger, logger.HTTPLoggerConfig{
+		SkipPaths: []string{"/health", "/healthz"},
+		Concise:   true,
+	})(mux)
+
 	s.httpServer = &http.Server{
 		Addr:           s.serverCfg.Address,
-		Handler:        mux,
+		Handler:        handler,
 		ReadTimeout:    s.serverCfg.ReadTimeout,
 		WriteTimeout:   s.serverCfg.WriteTimeout,
 		IdleTimeout:    s.serverCfg.IdleTimeout,
