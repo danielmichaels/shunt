@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/app"
 	"github.com/danielmichaels/shunt/internal/broker"
@@ -19,6 +21,11 @@ a KV bucket, and routes messages based on configured rules.
 Optional subsystems (gateway, auth manager) can be enabled via configuration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configPath, _ := cmd.Flags().GetString("config")
+		if !cmd.Flags().Changed("config") {
+			if envPath := os.Getenv("SHUNT_CONFIG_PATH"); envPath != "" {
+				configPath = envPath
+			}
+		}
 
 		v := viper.New()
 		v.BindPFlag("nats.urls", cmd.Flags().Lookup("nats-url"))
@@ -67,7 +74,7 @@ Optional subsystems (gateway, auth manager) can be enabled via configuration.`,
 }
 
 func init() {
-	serveCmd.Flags().String("config", "config/shunt.yaml", "path to config file (YAML or JSON, optional — env vars work without it)")
+	serveCmd.Flags().String("config", "shunt.yaml", "path to config file (YAML or JSON, optional — env vars work without it)")
 	serveCmd.Flags().StringSlice("nats-url", nil, "NATS server URLs to override config (repeatable or comma-separated)")
 	serveCmd.Flags().Bool("metrics-enabled", true, "override enabling of metrics server")
 	serveCmd.Flags().String("metrics-addr", "", "override metrics server address")
