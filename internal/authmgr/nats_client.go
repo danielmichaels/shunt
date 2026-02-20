@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/natsutil"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"log/slog"
 )
 
 // Timeout and retry constants for NATS client operations
@@ -30,13 +30,13 @@ type NATSClient struct {
 	conn   *nats.Conn
 	js     jetstream.JetStream
 	kv     jetstream.KeyValue
-	logger *logger.Logger
+	logger *slog.Logger
 	config *NATSConfig
 	shared bool
 }
 
 // NewNATSClient creates a NATS client and opens KV bucket
-func NewNATSClient(cfg *NATSConfig, storageConfig *StorageConfig, log *logger.Logger) (*NATSClient, error) {
+func NewNATSClient(cfg *NATSConfig, storageConfig *StorageConfig, log *slog.Logger) (*NATSClient, error) {
 	log.Info("connecting to NATS", "urls", cfg.URLs)
 
 	// Build connection options (same pattern as broker package)
@@ -97,7 +97,7 @@ func NewNATSClient(cfg *NATSConfig, storageConfig *StorageConfig, log *logger.Lo
 
 // NewNATSClientFromConn creates a NATSClient that reuses an existing NATS connection.
 // Used when the auth-manager runs as a subsystem of shunt.
-func NewNATSClientFromConn(nc *nats.Conn, storageConfig *StorageConfig, log *logger.Logger) (*NATSClient, error) {
+func NewNATSClientFromConn(nc *nats.Conn, storageConfig *StorageConfig, log *slog.Logger) (*NATSClient, error) {
 	js, err := jetstream.New(nc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JetStream: %w", err)
@@ -165,7 +165,7 @@ func (c *NATSClient) Close() error {
 }
 
 // buildNATSOptions creates NATS connection options with auth and TLS
-func buildNATSOptions(cfg *NATSConfig, log *logger.Logger) ([]nats.Option, error) {
+func buildNATSOptions(cfg *NATSConfig, log *slog.Logger) ([]nats.Option, error) {
 	var opts []nats.Option
 
 	opts = append(opts,

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/danielmichaels/shunt/internal/authmgr/providers"
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 )
 
 // Timeout and jitter constants for auth manager operations
@@ -26,7 +26,7 @@ const (
 type Manager struct {
 	nats      *NATSClient
 	providers []providers.Provider
-	logger    *logger.Logger
+	logger    *slog.Logger
 	metrics   *Metrics
 	wg        sync.WaitGroup
 	ctx       context.Context
@@ -34,7 +34,7 @@ type Manager struct {
 }
 
 // NewManager creates a new authentication manager
-func NewManager(nats *NATSClient, providerList []providers.Provider, log *logger.Logger, metrics *Metrics) *Manager {
+func NewManager(nats *NATSClient, providerList []providers.Provider, log *slog.Logger, metrics *Metrics) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Manager{

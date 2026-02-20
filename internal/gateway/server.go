@@ -16,6 +16,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
@@ -49,7 +51,7 @@ type webhookJob struct {
 // InboundServer handles HTTP requests and publishes to NATS.
 // It uses a fixed-size worker pool for bounded concurrency and backpressure.
 type InboundServer struct {
-	logger     *logger.Logger
+	logger     *slog.Logger
 	metrics    *metrics.Metrics
 	processor  *rule.Processor
 	jetstream  jetstream.JetStream
@@ -92,7 +94,7 @@ type PublishConfig struct {
 
 // NewInboundServer creates a new HTTP inbound server with a worker pool.
 func NewInboundServer(
-	logger *logger.Logger,
+	logger *slog.Logger,
 	metrics *metrics.Metrics,
 	processor *rule.Processor,
 	js jetstream.JetStream,
@@ -140,10 +142,14 @@ func (s *InboundServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/healthz", s.healthHandler)
 
-	// Create HTTP server
+	handler := logger.RequestLogger(s.logger, logger.HTTPLoggerConfig{
+		SkipPaths: []string{"/health", "/healthz"},
+		Concise:   true,
+	})(mux)
+
 	s.httpServer = &http.Server{
 		Addr:           s.serverCfg.Address,
-		Handler:        mux,
+		Handler:        handler,
 		ReadTimeout:    s.serverCfg.ReadTimeout,
 		WriteTimeout:   s.serverCfg.WriteTimeout,
 		IdleTimeout:    s.serverCfg.IdleTimeout,

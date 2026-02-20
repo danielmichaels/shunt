@@ -164,9 +164,9 @@ type GatewayConfig struct {
 
 // AuthManagerConfig controls the optional authentication manager subsystem
 type AuthManagerConfig struct {
-	Enabled   bool                    `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
-	Storage   AuthManagerStorage      `json:"storage" yaml:"storage" mapstructure:"storage"`
-	Providers []AuthManagerProvider   `json:"providers" yaml:"providers" mapstructure:"providers"`
+	Enabled   bool                  `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
+	Storage   AuthManagerStorage    `json:"storage" yaml:"storage" mapstructure:"storage"`
+	Providers []AuthManagerProvider `json:"providers" yaml:"providers" mapstructure:"providers"`
 }
 
 // AuthManagerStorage defines where to store tokens
@@ -363,7 +363,6 @@ func Load(path string, v *viper.Viper) (*Config, error) {
 
 	return &config, nil
 }
-
 
 // setViperDefaults registers all config keys with viper so that AutomaticEnv
 // can resolve environment variables during Unmarshal. Without this, viper's

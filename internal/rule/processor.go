@@ -9,7 +9,8 @@ import (
 
 	json "github.com/goccy/go-json"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/internal/metrics"
 )
 
@@ -26,7 +27,7 @@ type Processor struct {
 	kvRules         atomic.Value // holds map[string][]*Rule (subscription subject → rules)
 	timeProvider    TimeProvider
 	kvContext       *KVContext
-	logger          *logger.Logger
+	logger          *slog.Logger
 	metrics         *metrics.Metrics
 	stats           ProcessorStats
 	evaluator       *Evaluator
@@ -111,7 +112,7 @@ func (p *Processor) extractForEachArray(forEachTemplate string, context *Evaluat
 }
 
 // NewProcessor creates a new processor with optional signature verification
-func NewProcessor(log *logger.Logger, metrics *metrics.Metrics, kvCtx *KVContext, sigVerification *SignatureVerification) *Processor {
+func NewProcessor(log *slog.Logger, metrics *metrics.Metrics, kvCtx *KVContext, sigVerification *SignatureVerification) *Processor {
 	p := &Processor{
 		index:           NewRuleIndex(log),
 		allRules:        make([]*Rule, 0),

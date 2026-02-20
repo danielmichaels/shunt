@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
 	"gopkg.in/yaml.v3"
+	"log/slog"
 )
 
 // envVarPattern matches environment variable placeholders: ${VAR_NAME}
@@ -21,12 +21,12 @@ var envVarPattern = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
 // RulesLoader handles loading and validating rule definitions from YAML files
 type RulesLoader struct {
-	logger              *logger.Logger
+	logger              *slog.Logger
 	configuredKVBuckets []string
 }
 
 // NewRulesLoader creates a new rules loader
-func NewRulesLoader(log *logger.Logger, kvBuckets []string) *RulesLoader {
+func NewRulesLoader(log *slog.Logger, kvBuckets []string) *RulesLoader {
 	return &RulesLoader{
 		logger:              log,
 		configuredKVBuckets: kvBuckets,

@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"time"
 
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/authmgr"
 	"github.com/danielmichaels/shunt/internal/authmgr/providers"
 	"github.com/danielmichaels/shunt/internal/broker"
 	"github.com/danielmichaels/shunt/internal/gateway"
 	"github.com/danielmichaels/shunt/internal/lifecycle"
-	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
 )
@@ -33,7 +34,7 @@ var _ lifecycle.Application = (*RouterApp)(nil)
 // RouterApp represents the shunt application with all its components including KV support
 type RouterApp struct {
 	config           *config.Config
-	logger           *logger.Logger
+	logger           *slog.Logger
 	metrics          *metrics.Metrics
 	processor        *rule.Processor
 	broker           *broker.NATSBroker
@@ -261,7 +262,7 @@ func (app *RouterApp) startAuthManager() error {
 	return nil
 }
 
-func createProviders(configs []config.AuthManagerProvider, log *logger.Logger) ([]providers.Provider, error) {
+func createProviders(configs []config.AuthManagerProvider, log *slog.Logger) ([]providers.Provider, error) {
 	var providerList []providers.Provider
 
 	for _, cfg := range configs {
@@ -345,16 +346,9 @@ func (app *RouterApp) Close() error {
 		}
 	}
 
-	if app.logger != nil {
-		if err := app.logger.Sync(); err != nil {
-			app.logger.Debug("logger sync completed", "error", err)
-		}
-	}
-
 	if len(errs) > 0 {
 		return fmt.Errorf("cleanup errors: %v", errs)
 	}
 
 	return nil
 }
-

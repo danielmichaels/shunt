@@ -9,17 +9,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/google/uuid"
+	"log/slog"
 )
 
 // TemplateEngine processes rule template strings.
 type TemplateEngine struct {
-	logger *logger.Logger
+	logger *slog.Logger
 }
 
 // NewTemplateEngine creates a new TemplateEngine.
-func NewTemplateEngine(log *logger.Logger) *TemplateEngine {
+func NewTemplateEngine(log *slog.Logger) *TemplateEngine {
 	return &TemplateEngine{logger: log}
 }
 

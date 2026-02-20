@@ -36,8 +36,6 @@ Optional subsystems (gateway, auth manager) can be enabled via configuration.`,
 		if err != nil {
 			return err
 		}
-		defer appLogger.Sync()
-
 		createApp := func() (lifecycle.Application, error) {
 			baseApp, err := app.NewAppBuilder(cfg).
 				WithLogger().

@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/danielmichaels/shunt/config"
-	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"log/slog"
 )
 
 // Timeout and retry constants for subscription operations
@@ -58,7 +58,7 @@ var (
 type SubscriptionManager struct {
 	natsConn      *nats.Conn
 	jetStream     jetstream.JetStream
-	logger        *logger.Logger
+	logger        *slog.Logger
 	metrics       *metrics.Metrics
 	processor     *rule.Processor
 	consumerCfg   *config.ConsumerConfig
@@ -77,7 +77,7 @@ type Subscription struct {
 	Workers      int                       // Number of concurrent workers
 	iterator     jetstream.MessagesContext // Messages() iterator
 	cancel       context.CancelFunc
-	logger       *logger.Logger
+	logger       *slog.Logger
 	consumerCfg  *config.ConsumerConfig
 }
 
@@ -86,7 +86,7 @@ func NewSubscriptionManager(
 	natsConn *nats.Conn,
 	js jetstream.JetStream,
 	processor *rule.Processor,
-	logger *logger.Logger,
+	logger *slog.Logger,
 	metrics *metrics.Metrics,
 	consumerConfig *config.ConsumerConfig,
 	publishConfig *config.PublishConfig,

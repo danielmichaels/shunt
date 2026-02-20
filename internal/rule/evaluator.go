@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/internal/metrics"
 )
 
@@ -18,12 +19,12 @@ const clockSkewTolerance = 5 * time.Second
 
 // Evaluator processes rule conditions against an EvaluationContext
 type Evaluator struct {
-	logger  *logger.Logger
+	logger  *slog.Logger
 	metrics *metrics.Metrics
 }
 
 // NewEvaluator creates a new Evaluator
-func NewEvaluator(log *logger.Logger) *Evaluator {
+func NewEvaluator(log *slog.Logger) *Evaluator {
 	return &Evaluator{logger: log}
 }
 

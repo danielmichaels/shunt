@@ -19,9 +19,9 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/danielmichaels/shunt/config"
-	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
+	"log/slog"
 )
 
 // Client limits and timeout constants
@@ -51,7 +51,7 @@ const (
 // OutboundClient handles NATS messages and makes HTTP requests
 // ACK-on-Success: ACKs message only on HTTP 200-299, NAKs on failure
 type OutboundClient struct {
-	logger        *logger.Logger
+	logger        *slog.Logger
 	metrics       *metrics.Metrics
 	processor     *rule.Processor
 	jetstream     jetstream.JetStream
@@ -71,7 +71,7 @@ type OutboundSubscription struct {
 	Workers      int
 	iterator     jetstream.MessagesContext // Messages() iterator
 	cancel       context.CancelFunc
-	logger       *logger.Logger
+	logger       *slog.Logger
 }
 
 // ConsumerConfig contains JetStream consumer configuration
@@ -86,7 +86,7 @@ type ConsumerConfig struct {
 
 // NewOutboundClient creates a new HTTP outbound client
 func NewOutboundClient(
-	logger *logger.Logger,
+	logger *slog.Logger,
 	metrics *metrics.Metrics,
 	processor *rule.Processor,
 	js jetstream.JetStream,

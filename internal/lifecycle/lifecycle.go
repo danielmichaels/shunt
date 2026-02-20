@@ -10,14 +10,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/danielmichaels/shunt/internal/logger"
+	"log/slog"
 )
 
 // Run runs an application with SIGTERM/SIGINT handling only (no SIGHUP reload).
 // Used by shunt in KV mode where rule changes are picked up live via KV Watch.
 func Run(
 	createApp func() (Application, error),
-	log *logger.Logger,
+	log *slog.Logger,
 ) error {
 	shutdownSig := make(chan os.Signal, 1)
 	signal.Notify(shutdownSig, os.Interrupt, syscall.SIGTERM)
@@ -62,4 +62,3 @@ func Run(
 	log.Info("shutdown complete")
 	return runErr
 }
-
