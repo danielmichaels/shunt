@@ -12,7 +12,7 @@ import (
 type LocalKVCache struct {
 	cache   map[string]map[string]interface{} // bucket -> key -> parsed JSON value
 	mu      sync.RWMutex                      // Simple read-write mutex for concurrent access
-	logger  *slog.Logger                    // For debugging and monitoring
+	logger  *slog.Logger                      // For debugging and monitoring
 	enabled bool                              // Feature flag for easy disable
 }
 

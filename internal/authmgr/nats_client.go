@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
 	"github.com/danielmichaels/shunt/internal/natsutil"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"log/slog"
 )
 
 // Timeout and retry constants for NATS client operations

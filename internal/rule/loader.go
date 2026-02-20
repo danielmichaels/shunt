@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
 	"gopkg.in/yaml.v3"
+	"log/slog"
 )
 
 // envVarPattern matches environment variable placeholders: ${VAR_NAME}

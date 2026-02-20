@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
 	"github.com/nats-io/nats.go/jetstream"
+	"log/slog"
 )
 
 // Timeout constants for KV operations

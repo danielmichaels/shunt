@@ -62,4 +62,3 @@ func Run(
 	log.Info("shutdown complete")
 	return runErr
 }
-

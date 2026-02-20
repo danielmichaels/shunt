@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"log/slog"
 	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/nats-io/nats.go/jetstream"
+	"log/slog"
 )
 
 type RuleKVManager struct {

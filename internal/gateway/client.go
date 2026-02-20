@@ -19,9 +19,9 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/danielmichaels/shunt/config"
-	"log/slog"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
+	"log/slog"
 )
 
 // Client limits and timeout constants

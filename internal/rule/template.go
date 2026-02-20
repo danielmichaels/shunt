@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
 	"github.com/google/uuid"
+	"log/slog"
 )
 
 // TemplateEngine processes rule template strings.

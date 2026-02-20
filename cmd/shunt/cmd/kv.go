@@ -142,7 +142,6 @@ func spinStop(s *spinner.Spinner) {
 	}
 }
 
-
 func sanitizeKVKey(filename string) string {
 	key := strings.TrimSuffix(filename, ".yaml")
 	key = strings.TrimSuffix(key, ".yml")
