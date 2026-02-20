@@ -187,7 +187,7 @@ func (s *InboundServer) startWorkers(ctx context.Context) {
 		workerID := i + 1
 		go func() {
 			defer s.wg.Done()
-			s.logger.Info("starting inbound worker", "workerID", workerID)
+			s.logger.Debug("starting inbound worker", "workerID", workerID)
 			// Loop checks both context cancellation and channel closure
 			for {
 				select {

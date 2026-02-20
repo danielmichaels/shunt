@@ -18,10 +18,11 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
-	"log/slog"
 )
 
 // Client limits and timeout constants
@@ -170,7 +171,7 @@ func (c *OutboundClient) Start(ctx context.Context) error {
 	defer c.mu.RUnlock()
 
 	if len(c.subscriptions) == 0 {
-		c.logger.Info("no outbound subscriptions configured")
+		c.logger.Warn("no outbound subscriptions configured")
 		return nil
 	}
 

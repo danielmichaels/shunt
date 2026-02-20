@@ -73,10 +73,6 @@ func (app *RouterApp) SetRuleKVManager(mgr *broker.RuleKVManager) {
 
 // Run starts the application and waits for shutdown signal.
 func (app *RouterApp) Run(ctx context.Context) error {
-	app.logger.Info("starting shunt in KV mode",
-		"kvBucket", app.config.Rules.KVBucket,
-		"natsUrls", app.config.NATS.URLs)
-
 	if err := app.ruleKVManager.Watch(ctx); err != nil {
 		return fmt.Errorf("failed to start KV watcher: %w", err)
 	}
@@ -88,7 +84,7 @@ func (app *RouterApp) Run(ctx context.Context) error {
 		return fmt.Errorf("KV initial sync timed out: %w", err)
 	}
 
-	app.logger.Info("KV initial sync complete, processing messages")
+	app.logger.Debug("KV initial sync complete, processing messages")
 
 	if err := app.startGateway(ctx); err != nil {
 		return fmt.Errorf("failed to start gateway subsystem: %w", err)
@@ -115,7 +111,7 @@ func (app *RouterApp) startGateway(ctx context.Context) error {
 		return fmt.Errorf("http.server.address is required when gateway is enabled")
 	}
 
-	app.logger.Info("starting gateway subsystem")
+	app.logger.Debug("starting gateway subsystem")
 
 	serverConfig := &gateway.ServerConfig{
 		Address:             app.config.HTTP.Server.Address,
@@ -201,7 +197,7 @@ func (app *RouterApp) startGateway(ctx context.Context) error {
 		return fmt.Errorf("failed to start outbound client: %w", err)
 	}
 
-	app.logger.Info("gateway subsystem started",
+	app.logger.Info("gateway started",
 		"httpAddress", app.config.HTTP.Server.Address,
 		"outboundSubscriptions", len(outboundSubjects))
 

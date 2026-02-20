@@ -13,16 +13,16 @@ nats:
   # Option 1: Username/Password
   # username: "shunt-service"
   # password: "secure-password"
-  
+
   # Option 2: Token Authentication
   # token: "your-nats-token"
-  
+
   # Option 3: NKey Authentication (path to seed file)
   # nkey: "/etc/nats/nkey/user.seed"
-  
+
   # Option 4: JWT with .creds file (recommended for production)
   # credsFile: "/etc/nats/creds/shunt.creds"
-  
+
   # TLS Configuration
   tls:
     enable: true
@@ -30,7 +30,7 @@ nats:
     keyFile: "/etc/ssl/nats/client-key.pem"
     caFile: "/etc/ssl/nats/ca.pem"
     insecure: false  # Skip certificate verification (NOT recommended for production)
-  
+
   # JetStream Consumer Configuration
   consumers:
     consumerPrefix: "shunt" # Unique prefix for this application's consumers
@@ -40,24 +40,24 @@ nats:
                               # - 1 = lowest latency, immediate processing
                               # - 10-100 = balanced throughput and latency
                               # - 100+ = maximum throughput, higher latency
-    
+
     fetchTimeout: 5s          # Max wait time when fetching messages
                               # - Lower (1s) = more aggressive, higher CPU
                               # - Higher (5s+) = more efficient, allows heartbeat
                               # Note: For fetchTimeout > 1.5s, automatic heartbeat is enabled
                               #       For fetchTimeout <= 1.5s, heartbeat is omitted (conflicts with NATS constraints) Must be minimum 1s
-    
+
     maxAckPending: 1000       # Max unacknowledged messages per consumer
                               # Controls backpressure and memory usage
                               # Increase for high throughput scenarios
-    
+
     # Reliability Settings
     ackWaitTimeout: 30s       # Time to wait for ack before redelivery
                               # Increase if message processing takes longer
-    
+
     maxDeliver: 3             # Max redelivery attempts before giving up
                               # Failed messages move to dead letter after this
-    
+
     # Delivery Behavior
     deliverPolicy: new        # Options:
                               # - all: Process all messages (including historical)
@@ -65,11 +65,11 @@ nats:
                               # - last: Start from most recent message
                               # - by_start_time: Start from specific timestamp
                               # - by_start_sequence: Start from specific sequence number
-    
+
     replayPolicy: instant     # Options:
                               # - instant: Deliver messages as fast as possible
                               # - original: Replay messages at original timing intervals
-  
+
   # NATS Connection Behavior
   connection:
     maxReconnects: -1         # -1 = unlimited reconnection attempts
@@ -91,15 +91,15 @@ nats:
     #   * No requirements: Works with any subject
     #   * Best for: High-throughput scenarios, non-critical actions
     mode: jetstream
-    
+
     # Ack timeout for JetStream publishes (only used in jetstream mode)
     # How long to wait for stream ack before considering publish failed
     ackTimeout: 5s
-    
+
     # Max retries for failed publish operations (applies to both modes)
     # Failed publishes will be retried with exponential backoff
     maxRetries: 3
-    
+
     # Base delay for retry exponential backoff (applies to both modes)
     # Actual delays: 50ms, 100ms, 200ms (for 3 retries)
     retryBaseDelay: 50ms
@@ -116,27 +116,95 @@ kv:
     - "customer_data"         # Customer metadata for enrichment
     - "feature_flags"         # Feature toggles and A/B testing
     - "system_config"         # System-wide configuration
-  
+
   # Local Cache Configuration - High Performance In-Memory KV Cache
   localCache:
     enabled: true             # Enable in-memory KV caching (default: true)
     # When enabled:
     # - All KV data loaded into memory at startup
     # - Real-time updates via KV Watch API
-    # 
+    #
     # Set to false to disable caching (useful for troubleshooting or memory constraints)
+
+# Routing Rules Configuration
+rules:
+  kvBucket: rules             # KV bucket name where routing rules are stored
+
+# Array Iteration Configuration
+forEach:
+  maxIterations: 100          # Max iterations for array operations in rule processing
+                              # Range: 0-10000 (0 = unlimited)
+                              # Prevents runaway loops on unexpectedly large arrays
 
 # Security Configuration
 security:
   verification:
     # Enable cryptographic signature verification
     enabled: true
-    
+
     # Header containing signer's NKey public key
     publicKeyHeader: "Nats-Public-Key"
-    
+
     # Header containing Base64-encoded Ed25519 signature
     signatureHeader: "Nats-Signature"
+
+# HTTP Gateway Configuration
+gateway:
+  enabled: true              # Enable HTTP gateway subsystem (default: false)
+                              # When enabled, starts inbound HTTP server and outbound HTTP client
+                              # Uses the http.server and http.client config sections below
+
+# HTTP Server and Client Configuration (used by gateway)
+http:
+  server:
+    address: ":8080"              # Listen address for inbound HTTP server
+    readTimeout: 30s              # Max time to read entire request including body
+    writeTimeout: 30s             # Max time to write response
+    idleTimeout: 120s             # Max time to wait for next request on keep-alive
+    maxHeaderBytes: 1048576       # Max header size in bytes (1MB)
+    shutdownGracePeriod: 30s      # Time to wait for in-flight requests during shutdown
+    inboundWorkerCount: 10        # Fixed worker pool size for processing webhooks
+    inboundQueueSize: 1000        # Bounded queue size; returns 503 when full
+
+  client:
+    timeout: 30s                  # Timeout for outbound HTTP requests
+    maxIdleConns: 100             # Max idle connections across all hosts
+    maxIdleConnsPerHost: 10       # Max idle connections per host
+    idleConnTimeout: 90s          # How long idle connections stay in pool
+    tls:
+      insecureSkipVerify: false   # Skip TLS verification for outbound calls (NOT for production)
+
+# Authentication Manager Configuration
+authManager:
+  enabled: false
+  storage:
+    bucket: "tokens"              # KV bucket for storing tokens (default: "tokens" when enabled)
+    keyPrefix: ""                 # Optional prefix for token keys in the bucket
+
+  providers:
+    # OAuth2 Client Credentials provider
+    - id: "my-oauth2-provider"
+      type: oauth2
+      kvKey: "oauth2-token"       # Key in the storage bucket for this token
+      tokenUrl: "https://auth.example.com/oauth/token"
+      clientId: "your-client-id"
+      clientSecret: "your-client-secret"
+      scopes:
+        - "read"
+        - "write"
+      refreshBefore: 5m           # Refresh token this long before expiry
+
+    # Custom HTTP provider
+    - id: "my-custom-provider"
+      type: custom-http
+      kvKey: "custom-token"
+      authUrl: "https://api.example.com/auth/token"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      body: '{"api_key": "your-api-key"}'
+      tokenPath: "data.access_token"  # JSONPath-like expression to extract token
+      refreshEvery: 30m               # Refresh on this fixed interval
 
 # Logging Configuration
 logging:
@@ -145,10 +213,10 @@ logging:
                               # info: Standard operational logging
                               # warn: Only warnings and errors
                               # error: Only errors
-  
+
   outputPath: stdout          # Output destination: stdout, stderr, or file path
                               # Examples: stdout, /var/log/shunt.log
-  
+
   encoding: json              # Log format: json or console
                               # json: Structured logging for log aggregation
                               # console: Human-readable for development
