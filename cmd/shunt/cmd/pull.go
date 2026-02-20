@@ -9,99 +9,91 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
-var pullCmd = &cobra.Command{
-	Use:     "pull [key]",
-	Aliases: []string{"get"},
-	Short:   "Download rules from a NATS KV bucket to local YAML files",
-	Long: `Pull downloads rules from the KV bucket. If a key is specified, only that rule is
-downloaded. Otherwise all rules in the bucket are downloaded.
+type KVPullCmd struct {
+	Key    string `arg:"" optional:"" help:"Key to pull (omit for all)"`
+	Output string `short:"o" default:"." help:"Output directory for downloaded rule files"`
+	Format string `short:"f" default:"" help:"Output format to stdout instead of files (yaml or json)"`
+}
 
-Use -f yaml or -f json to print rules to stdout instead of saving to files.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		outDir, _ := cmd.Flags().GetString("output")
-		format, _ := cmd.Flags().GetString("format")
+func (p *KVPullCmd) Run(kv *KVCmd) error {
+	format := p.Format
+	if format != "" {
+		format = strings.ToLower(format)
+		if format != "yaml" && format != "json" {
+			return fmt.Errorf("unsupported format %q (use yaml or json)", format)
+		}
+	}
 
+	nc, bucket, err := kv.connectToNATS()
+	if err != nil {
+		return err
+	}
+	defer nc.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), kvOperationTimeout)
+	defer cancel()
+
+	if format == "" {
+		if err := os.MkdirAll(p.Output, 0o755); err != nil {
+			return fmt.Errorf("failed to create output directory: %w", err)
+		}
+	}
+
+	if p.Key != "" {
+		entry, err := bucket.Get(ctx, p.Key)
+		if err != nil {
+			return fmt.Errorf("failed to get key '%s': %w", p.Key, err)
+		}
 		if format != "" {
-			format = strings.ToLower(format)
-			if format != "yaml" && format != "json" {
-				return fmt.Errorf("unsupported format %q (use yaml or json)", format)
-			}
+			return printRule(entry.Value(), format)
 		}
-
-		nc, kv, err := connectToNATS(cmd)
-		if err != nil {
-			return err
+		filename := p.Key + ".yaml"
+		outPath := filepath.Join(p.Output, filename)
+		if err := os.WriteFile(outPath, entry.Value(), 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", outPath, err)
 		}
-		defer nc.Close()
-
-		ctx, cancel := context.WithTimeout(context.Background(), kvOperationTimeout)
-		defer cancel()
-
-		if format == "" {
-			if err := os.MkdirAll(outDir, 0o755); err != nil {
-				return fmt.Errorf("failed to create output directory: %w", err)
-			}
-		}
-
-		if len(args) == 1 {
-			key := args[0]
-			entry, err := kv.Get(ctx, key)
-			if err != nil {
-				return fmt.Errorf("failed to get key '%s': %w", key, err)
-			}
-			if format != "" {
-				return printRule(entry.Value(), format)
-			}
-			filename := key + ".yaml"
-			outPath := filepath.Join(outDir, filename)
-			if err := os.WriteFile(outPath, entry.Value(), 0o644); err != nil {
-				return fmt.Errorf("failed to write %s: %w", outPath, err)
-			}
-			fmt.Fprintf(os.Stderr, "  pulled %s → %s\n", key, outPath)
-			return nil
-		}
-
-		keys, err := kv.Keys(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to list keys: %w", err)
-		}
-
-		pulled := 0
-		for _, key := range keys {
-			entry, err := kv.Get(ctx, key)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  warning: failed to get key '%s': %v\n", key, err)
-				continue
-			}
-			if format != "" {
-				if pulled > 0 {
-					fmt.Println()
-				}
-				if err := printRule(entry.Value(), format); err != nil {
-					return err
-				}
-				pulled++
-				continue
-			}
-			filename := key + ".yaml"
-			outPath := filepath.Join(outDir, filename)
-			if err := os.WriteFile(outPath, entry.Value(), 0o644); err != nil {
-				return fmt.Errorf("failed to write %s: %w", outPath, err)
-			}
-			fmt.Fprintf(os.Stderr, "  pulled %s → %s\n", key, outPath)
-			pulled++
-		}
-
-		if format == "" {
-			fmt.Fprintf(os.Stderr, "\n%d rules pulled to %s\n", pulled, outDir)
-		}
+		fmt.Fprintf(os.Stderr, "  pulled %s → %s\n", p.Key, outPath)
 		return nil
-	},
+	}
+
+	keys, err := bucket.Keys(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list keys: %w", err)
+	}
+
+	pulled := 0
+	for _, key := range keys {
+		entry, err := bucket.Get(ctx, key)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  warning: failed to get key '%s': %v\n", key, err)
+			continue
+		}
+		if format != "" {
+			if pulled > 0 {
+				fmt.Println()
+			}
+			if err := printRule(entry.Value(), format); err != nil {
+				return err
+			}
+			pulled++
+			continue
+		}
+		filename := key + ".yaml"
+		outPath := filepath.Join(p.Output, filename)
+		if err := os.WriteFile(outPath, entry.Value(), 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", outPath, err)
+		}
+		fmt.Fprintf(os.Stderr, "  pulled %s → %s\n", key, outPath)
+		pulled++
+	}
+
+	if format == "" {
+		fmt.Fprintf(os.Stderr, "\n%d rules pulled to %s\n", pulled, p.Output)
+	}
+	return nil
 }
 
 func printRule(data []byte, format string) error {
@@ -148,9 +140,4 @@ func inlineJSONStrings(v any) any {
 	default:
 		return val
 	}
-}
-
-func init() {
-	pullCmd.Flags().StringP("output", "o", ".", "Output directory for downloaded rule files")
-	pullCmd.Flags().StringP("format", "f", "", "Output format to stdout instead of files (yaml or json)")
 }

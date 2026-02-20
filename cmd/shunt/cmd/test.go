@@ -3,68 +3,49 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/tester"
-	"github.com/spf13/cobra"
 )
 
-var testCmd = &cobra.Command{
-	Use:   "test --rules <dir>",
-	Short: "Run all test suites for rules in a directory",
-	Long: `The test command discovers and runs all test suites. A test suite is a directory
-named 'my_rule_test/' that corresponds to a 'my_rule.yaml' file. It runs all
-'match_*.json' and 'not_match_*.json' files within the suite, validating
-conditions, templates, and forEach logic.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		rulesDir, _ := cmd.Flags().GetString("rules")
-		outputFormat, _ := cmd.Flags().GetString("output")
-		verbose, _ := cmd.Flags().GetBool("verbose")
-		parallel, _ := cmd.Flags().GetInt("parallel")
-
-		if rulesDir == "" {
-			return cmd.Help()
-		}
-
-		if outputFormat == "pretty" {
-			fmt.Printf("▶ RUNNING TESTS in %s\n\n", rulesDir)
-		}
-
-		log := logger.NewNopLogger()
-		testRunner := tester.New(log, verbose, parallel)
-		summary, err := testRunner.RunBatchTest(rulesDir)
-
-		if outputFormat == "json" {
-			encoder := json.NewEncoder(cmd.OutOrStdout())
-			encoder.SetIndent("", "  ")
-			if encodeErr := encoder.Encode(summary); encodeErr != nil {
-				return encodeErr
-			}
-		} else {
-			printSummaryPretty(summary)
-		}
-
-		if err != nil {
-			return err
-		}
-
-		if summary.Failed > 0 {
-			return fmt.Errorf("tests failed")
-		}
-		return nil
-	},
+type TestCmd struct {
+	Rules    string `short:"r" required:"" help:"Path to rules directory" type:"existingdir"`
+	Output   string `short:"o" default:"pretty" help:"Output format" enum:"pretty,json"`
+	Verbose  bool   `short:"V" help:"Show detailed output for failures"`
+	Parallel int    `short:"p" default:"4" help:"Parallel test workers (0 = sequential)"`
 }
 
-func init() {
-	testCmd.Flags().StringP("rules", "r", "", "Path to the root directory for rules (required)")
-	testCmd.Flags().StringP("output", "o", "pretty", "Output format: pretty, json")
-	testCmd.Flags().BoolP("verbose", "v", false, "Show detailed output for failures")
-	testCmd.Flags().IntP("parallel", "p", 4, "Number of parallel test workers (0 = sequential)")
-	testCmd.MarkFlagRequired("rules")
+func (t *TestCmd) Run(globals *Globals) error {
+	if t.Output == "pretty" {
+		fmt.Printf("▶ RUNNING TESTS in %s\n\n", t.Rules)
+	}
+
+	log := logger.NewNopLogger()
+	testRunner := tester.New(log, t.Verbose, t.Parallel)
+	summary, err := testRunner.RunBatchTest(t.Rules)
+
+	if t.Output == "json" {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if encodeErr := encoder.Encode(summary); encodeErr != nil {
+			return encodeErr
+		}
+	} else {
+		printSummaryPretty(summary)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if summary.Failed > 0 {
+		return fmt.Errorf("tests failed")
+	}
+	return nil
 }
 
-// printSummaryPretty is a helper to print the test summary in a human-readable format.
 func printSummaryPretty(summary tester.TestSummary) {
 	fmt.Println("--- SUMMARY ---")
 	fmt.Printf("Total Tests: %d, Passed: %d, Failed: %d\n",

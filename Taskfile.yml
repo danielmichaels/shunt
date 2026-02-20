@@ -5,10 +5,10 @@ vars:
   LDFLAGS: -s -w
 
 env:
-  SHUNT_LOGGING_LEVEL: info
-  SHUNT_LOGGING_ENCODING: console
+  SHUNT_LOG_LEVEL: info
+  SHUNT_LOG_ENCODING: console
   SHUNT_NATS_URL: "nats://host.docker.internal:4442"
-  SHUNT_CONFIG_PATH: ./shunt.local.yaml
+  SHUNT_CONFIG: ./shunt.local.yaml
 
 silent: true
 
