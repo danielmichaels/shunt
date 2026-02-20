@@ -10,100 +10,80 @@ import (
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/danielmichaels/shunt/internal/tester"
-	"github.com/spf13/cobra"
 )
 
-var newCmd = &cobra.Command{
-	Use:   "new",
-	Short: "Create a new rule from a template or interactively",
-	Long: `The new command helps you create new rule files. You can either generate a rule
-from a predefined template for common use cases or build one step-by-step
-through an interactive prompt.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		renderer := cli.NewRenderer()
-		prompter := cli.NewPrompter()
-
-		// Handle --list flag
-		if list, _ := cmd.Flags().GetBool("list"); list {
-			return listTemplates(renderer)
-		}
-
-		// Handle --show flag
-		if showTemplate, _ := cmd.Flags().GetString("show"); showTemplate != "" {
-			return showTemplateContent(renderer, showTemplate)
-		}
-
-		// Main logic: interactive or template-based creation
-		templateName, _ := cmd.Flags().GetString("template")
-		isInteractive, _ := cmd.Flags().GetBool("interactive")
-		withTests, _ := cmd.Flags().GetBool("with-tests")
-		output, _ := cmd.Flags().GetString("output")
-
-		var ruleBytes []byte
-		var err error
-
-		// If interactive flag is set, or no template is provided, run the builder
-		if isInteractive || templateName == "" {
-			builder := cli.NewRuleBuilder(prompter)
-			ruleBytes, err = builder.BuildRule()
-			if err != nil {
-				return fmt.Errorf("interactive build failed: %w", err)
-			}
-		} else {
-			content, err := renderer.GetTemplateContent(templateName)
-			if err != nil {
-				return err
-			}
-			ruleBytes = []byte(content)
-		}
-
-		// Determine output path
-		if output == "" {
-			output, err = prompter.AskWithDefault("Enter filename for the new rule:", "new-rule.yaml")
-			if err != nil {
-				return err
-			}
-		}
-		// Ensure .yaml extension and place in 'rules' dir if appropriate
-		output = normalizeOutputPath(output)
-
-		if err := writeFileWithConfirm(output, ruleBytes); err != nil {
-			// If writeFileWithConfirm returns nil, it means the user cancelled, so we should exit gracefully.
-			if err.Error() == "cancelled" {
-				return nil
-			}
-			return err
-		}
-		fmt.Printf("%s✓ Success! Rule file '%s' created.%s\n", cli.ColorGreen, output, cli.ColorReset)
-
-		// Phase 4: Validation and Test Scaffolding
-		if err := validateRuleFile(output); err != nil {
-			fmt.Printf("%sWarning: The generated rule has a validation issue: %v%s\n", cli.ColorYellow, err, cli.ColorReset)
-		}
-
-		scaffoldTests := withTests
-		if !scaffoldTests {
-			scaffoldTests, _ = prompter.Confirm("Generate test scaffold for this rule?")
-		}
-
-		if scaffoldTests {
-			testRunner := tester.New(logger.NewNopLogger(), false, 0)
-			if err := testRunner.Scaffold(output, false); err != nil {
-				return fmt.Errorf("failed to scaffold tests: %w", err)
-			}
-		}
-
-		return nil
-	},
+type NewCmd struct {
+	Template    string `short:"t" help:"Named template (e.g., nats-basic)"`
+	Output      string `short:"o" help:"Output file path"`
+	Interactive bool   `short:"i" help:"Start interactive rule builder"`
+	List        bool   `help:"List available templates"`
+	Show        string `help:"Show template content"`
+	WithTests   bool   `name:"with-tests" help:"Scaffold tests after creation"`
 }
 
-func init() {
-	newCmd.Flags().StringP("template", "t", "", "Create a rule from a named template (e.g., nats-basic)")
-	newCmd.Flags().StringP("output", "o", "", "Path to write the new rule file")
-	newCmd.Flags().BoolP("interactive", "i", false, "Start the interactive rule builder")
-	newCmd.Flags().Bool("list", false, "List available templates")
-	newCmd.Flags().String("show", "", "Show the content of a specific template")
-	newCmd.Flags().Bool("with-tests", false, "Automatically scaffold tests after creating the rule")
+func (n *NewCmd) Run(globals *Globals) error {
+	renderer := cli.NewRenderer()
+	prompter := cli.NewPrompter()
+
+	if n.List {
+		return listTemplates(renderer)
+	}
+
+	if n.Show != "" {
+		return showTemplateContent(renderer, n.Show)
+	}
+
+	var ruleBytes []byte
+	var err error
+
+	if n.Interactive || n.Template == "" {
+		builder := cli.NewRuleBuilder(prompter)
+		ruleBytes, err = builder.BuildRule()
+		if err != nil {
+			return fmt.Errorf("interactive build failed: %w", err)
+		}
+	} else {
+		content, err := renderer.GetTemplateContent(n.Template)
+		if err != nil {
+			return err
+		}
+		ruleBytes = []byte(content)
+	}
+
+	output := n.Output
+	if output == "" {
+		output, err = prompter.AskWithDefault("Enter filename for the new rule:", "new-rule.yaml")
+		if err != nil {
+			return err
+		}
+	}
+	output = normalizeOutputPath(output)
+
+	if err := writeFileWithConfirm(output, ruleBytes); err != nil {
+		if err.Error() == "cancelled" {
+			return nil
+		}
+		return err
+	}
+	fmt.Printf("%s✓ Success! Rule file '%s' created.%s\n", cli.ColorGreen, output, cli.ColorReset)
+
+	if err := validateRuleFile(output); err != nil {
+		fmt.Printf("%sWarning: The generated rule has a validation issue: %v%s\n", cli.ColorYellow, err, cli.ColorReset)
+	}
+
+	scaffoldTests := n.WithTests
+	if !scaffoldTests {
+		scaffoldTests, _ = prompter.Confirm("Generate test scaffold for this rule?")
+	}
+
+	if scaffoldTests {
+		testRunner := tester.New(logger.NewNopLogger(), false, 0)
+		if err := testRunner.Scaffold(output, false); err != nil {
+			return fmt.Errorf("failed to scaffold tests: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func listTemplates(r *cli.Renderer) error {
@@ -147,7 +127,7 @@ func writeFileWithConfirm(path string, data []byte) error {
 		fmt.Scanln(&response)
 		if strings.ToLower(strings.TrimSpace(response)) != "y" {
 			fmt.Println("Cancelled.")
-			return fmt.Errorf("cancelled") // Return a specific error to signal cancellation
+			return fmt.Errorf("cancelled")
 		}
 	}
 	return os.WriteFile(path, data, 0644)

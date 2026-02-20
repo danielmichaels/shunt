@@ -1,83 +1,75 @@
 package cmd
 
 import (
-	"os"
-
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/app"
 	"github.com/danielmichaels/shunt/internal/broker"
 	"github.com/danielmichaels/shunt/internal/lifecycle"
 	"github.com/danielmichaels/shunt/internal/logger"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-var serveCmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Start the shunt message routing server",
-	Long: `Start the shunt server which connects to NATS JetStream, loads rules from
-a KV bucket, and routes messages based on configured rules.
-
-Optional subsystems (gateway, auth manager) can be enabled via configuration.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		configPath, _ := cmd.Flags().GetString("config")
-		if !cmd.Flags().Changed("config") {
-			if envPath := os.Getenv("SHUNT_CONFIG_PATH"); envPath != "" {
-				configPath = envPath
-			}
-		}
-
-		v := viper.New()
-		v.BindPFlag("nats.urls", cmd.Flags().Lookup("nats-url"))
-		v.BindPFlag("metrics.enabled", cmd.Flags().Lookup("metrics-enabled"))
-		v.BindPFlag("metrics.address", cmd.Flags().Lookup("metrics-addr"))
-		v.BindPFlag("metrics.path", cmd.Flags().Lookup("metrics-path"))
-		v.BindPFlag("logging.level", cmd.Flags().Lookup("log-level"))
-
-		cfg, err := config.Load(configPath, v)
-		if err != nil {
-			return err
-		}
-
-		appLogger, err := logger.NewLogger(&cfg.Logging)
-		if err != nil {
-			return err
-		}
-		createApp := func() (lifecycle.Application, error) {
-			baseApp, err := app.NewAppBuilder(cfg).
-				WithLogger().
-				WithMetrics().
-				WithNATSBroker().
-				WithKVRuleProcessor().
-				Build()
-			if err != nil {
-				return nil, err
-			}
-
-			routerApp := app.NewKVRouterApp(baseApp, cfg)
-
-			kvManager := broker.NewRuleKVManager(
-				cfg.Rules.KVBucket,
-				cfg.KV.AutoProvision,
-				baseApp.Processor,
-				baseApp.Broker,
-				baseApp.RulesLoader,
-				baseApp.Logger,
-			)
-			routerApp.SetRuleKVManager(kvManager)
-
-			return routerApp, nil
-		}
-
-		return lifecycle.Run(createApp, appLogger)
-	},
+type ServeCmd struct {
+	Config         string   `short:"c" default:"shunt.yaml" help:"Path to config file"`
+	NATSURLs       []string `name:"nats-url" help:"NATS server URLs (repeatable)" sep:","`
+	LogLevel       string   `name:"log-level" help:"Log level (debug, info, warn, error)"`
+	MetricsEnabled *bool    `name:"metrics-enabled" help:"Enable metrics server" negatable:""`
+	MetricsAddr    string   `name:"metrics-addr" help:"Metrics server address"`
+	MetricsPath    string   `name:"metrics-path" help:"Metrics endpoint path"`
+	GatewayEnabled *bool    `name:"gateway-enabled" help:"Enable HTTP gateway" negatable:""`
+	KVEnabled      *bool    `name:"kv-enabled" help:"Enable KV store" negatable:""`
+	WorkerCount    *int     `name:"worker-count" help:"Number of consumer workers"`
 }
 
-func init() {
-	serveCmd.Flags().String("config", "shunt.yaml", "path to config file (YAML or JSON, optional — env vars work without it)")
-	serveCmd.Flags().StringSlice("nats-url", nil, "NATS server URLs to override config (repeatable or comma-separated)")
-	serveCmd.Flags().Bool("metrics-enabled", true, "override enabling of metrics server")
-	serveCmd.Flags().String("metrics-addr", "", "override metrics server address")
-	serveCmd.Flags().String("metrics-path", "", "override metrics endpoint path")
-	serveCmd.Flags().String("log-level", "", "override log level (debug, info, warn, error)")
+func (s *ServeCmd) toOverrides() config.ServeOverrides {
+	return config.ServeOverrides{
+		NATSURLs:       s.NATSURLs,
+		LogLevel:       s.LogLevel,
+		MetricsEnabled: s.MetricsEnabled,
+		MetricsAddr:    s.MetricsAddr,
+		MetricsPath:    s.MetricsPath,
+		GatewayEnabled: s.GatewayEnabled,
+		KVEnabled:      s.KVEnabled,
+		WorkerCount:    s.WorkerCount,
+	}
+}
+
+func (s *ServeCmd) Run(_ *Globals) error {
+	cfg, err := config.Load(s.Config)
+	if err != nil {
+		return err
+	}
+	cfg.ApplyOverrides(s.toOverrides())
+
+	appLogger, err := logger.NewLogger(&cfg.Logging)
+	if err != nil {
+		return err
+	}
+
+	createApp := func() (lifecycle.Application, error) {
+		baseApp, err := app.NewAppBuilder(cfg).
+			WithLogger().
+			WithMetrics().
+			WithNATSBroker().
+			WithKVRuleProcessor().
+			Build()
+		if err != nil {
+			return nil, err
+		}
+
+		routerApp := app.NewKVRouterApp(baseApp, cfg)
+
+		kvManager := broker.NewRuleKVManager(
+			cfg.Rules.KVBucket,
+			cfg.KV.AutoProvision,
+			baseApp.Processor,
+			baseApp.Broker,
+			baseApp.RulesLoader,
+			baseApp.Logger,
+		)
+		routerApp.SetRuleKVManager(kvManager)
+
+		return routerApp, nil
+	}
+
+	return lifecycle.Run(createApp, appLogger)
 }

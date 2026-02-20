@@ -1,8 +1,7 @@
-// file: internal/authmgr/config.go
-
 package authmgr
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -11,99 +10,81 @@ import (
 	"time"
 
 	"github.com/danielmichaels/shunt/config"
-	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
-// envVarPattern matches environment variable placeholders: ${VAR_NAME}
-// Allows uppercase, lowercase, numbers, and underscores for consistency
 var envVarPattern = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
-// Config represents the complete auth-manager configuration
 type Config struct {
-	NATS      NATSConfig       `mapstructure:"nats"`
-	Storage   StorageConfig    `mapstructure:"storage"`
-	Logging   config.LogConfig `mapstructure:"logging"`
-	Metrics   MetricsConfig    `mapstructure:"metrics"`
-	Providers []ProviderConfig `mapstructure:"providers"`
+	NATS      NATSConfig       `yaml:"nats"`
+	Storage   StorageConfig    `yaml:"storage"`
+	Logging   config.LogConfig `yaml:"logging"`
+	Metrics   MetricsConfig    `yaml:"metrics"`
+	Providers []ProviderConfig `yaml:"providers"`
 }
 
-// NATSConfig mirrors shunt NATS config (connection only)
 type NATSConfig struct {
-	URLs      []string `mapstructure:"urls"`
-	Username  string   `mapstructure:"username"`
-	Password  string   `mapstructure:"password"`
-	Token     string   `mapstructure:"token"`
-	NKey      string   `mapstructure:"nkey"`
-	CredsFile string   `mapstructure:"credsFile"`
+	URLs      []string `yaml:"urls"`
+	Username  string   `yaml:"username"`
+	Password  string   `yaml:"password"`
+	Token     string   `yaml:"token"`
+	NKey      string   `yaml:"nkey"`
+	CredsFile string   `yaml:"credsFile"`
 
 	TLS struct {
-		Enable   bool   `mapstructure:"enable"`
-		CertFile string `mapstructure:"certFile"`
-		KeyFile  string `mapstructure:"keyFile"`
-		CAFile   string `mapstructure:"caFile"`
-		Insecure bool   `mapstructure:"insecure"`
-	} `mapstructure:"tls"`
+		Enable   bool   `yaml:"enable"`
+		CertFile string `yaml:"certFile"`
+		KeyFile  string `yaml:"keyFile"`
+		CAFile   string `yaml:"caFile"`
+		Insecure bool   `yaml:"insecure"`
+	} `yaml:"tls"`
 }
 
-// StorageConfig defines where to store tokens
 type StorageConfig struct {
-	Bucket        string `mapstructure:"bucket"`    // KV bucket name
-	KeyPrefix     string `mapstructure:"keyPrefix"` // Optional prefix for keys
-	AutoProvision bool   `mapstructure:"-"`         // Set programmatically, not from config file
+	Bucket        string `yaml:"bucket"`
+	KeyPrefix     string `yaml:"keyPrefix"`
+	AutoProvision bool   `yaml:"-"`
 }
 
-// MetricsConfig for optional Prometheus metrics
 type MetricsConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Address string `mapstructure:"address"`
+	Enabled bool   `yaml:"enabled"`
+	Address string `yaml:"address"`
 }
 
-// ProviderConfig defines an authentication provider
 type ProviderConfig struct {
-	ID            string `mapstructure:"id"`
-	Type          string `mapstructure:"type"` // "oauth2" or "custom-http"
-	KVKey         string `mapstructure:"kvKey"`
-	RefreshBefore string `mapstructure:"refreshBefore"` // OAuth2 only
-	RefreshEvery  string `mapstructure:"refreshEvery"`  // Custom HTTP
+	ID            string `yaml:"id"`
+	Type          string `yaml:"type"`
+	KVKey         string `yaml:"kvKey"`
+	RefreshBefore string `yaml:"refreshBefore"`
+	RefreshEvery  string `yaml:"refreshEvery"`
 
-	// OAuth2 fields
-	TokenURL     string   `mapstructure:"tokenUrl"`
-	ClientID     string   `mapstructure:"clientId"`
-	ClientSecret string   `mapstructure:"clientSecret"`
-	Scopes       []string `mapstructure:"scopes"`
+	TokenURL     string   `yaml:"tokenUrl"`
+	ClientID     string   `yaml:"clientId"`
+	ClientSecret string   `yaml:"clientSecret"`
+	Scopes       []string `yaml:"scopes"`
 
-	// Custom HTTP fields
-	AuthURL   string            `mapstructure:"authUrl"`
-	Method    string            `mapstructure:"method"`
-	Headers   map[string]string `mapstructure:"headers"`
-	Body      string            `mapstructure:"body"`
-	TokenPath string            `mapstructure:"tokenPath"`
+	AuthURL   string            `yaml:"authUrl"`
+	Method    string            `yaml:"method"`
+	Headers   map[string]string `yaml:"headers"`
+	Body      string            `yaml:"body"`
+	TokenPath string            `yaml:"tokenPath"`
 }
 
-// Load reads configuration from file using Viper
 func Load(configPath string) (*Config, error) {
-	v := viper.New()
-	v.SetConfigFile(configPath)
-
-	// Environment variable support (for direct overrides like AUTH_MGR_NATS_URLS)
-	v.SetEnvPrefix("AUTH_MGR")
-	v.AutomaticEnv()
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("failed to read config: %w", err)
-		}
-	}
-
 	var cfg Config
 	setDefaults(&cfg)
 
-	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("failed to read config: %w", err)
+		}
+	} else {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+		}
 	}
 
-	// Expand ${VAR_NAME} placeholders throughout the loaded config
 	if err := expandEnvVars(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to expand environment variables: %w", err)
 	}
@@ -115,12 +96,9 @@ func Load(configPath string) (*Config, error) {
 	return &cfg, nil
 }
 
-// unsetEnvVars tracks environment variables that were referenced but not set
 var unsetEnvVars []string
 
-// expandEnvVars recursively expands ${VAR} placeholders in the config struct.
 func expandEnvVars(cfg interface{}) error {
-	// Reset tracking for each expansion
 	unsetEnvVars = nil
 
 	v := reflect.ValueOf(cfg)
@@ -131,16 +109,13 @@ func expandEnvVars(cfg interface{}) error {
 		return err
 	}
 
-	// Report any unset environment variables
 	if len(unsetEnvVars) > 0 {
 		return fmt.Errorf("missing environment variables: %v (set them or remove ${} references from config)", unsetEnvVars)
 	}
 	return nil
 }
 
-// expandRecursive is the helper that uses reflection to walk the config struct.
 func expandRecursive(v reflect.Value) error {
-	// Dereference pointers and interfaces to get to the actual value
 	if v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 		if v.IsNil() {
 			return nil
@@ -184,8 +159,6 @@ func expandRecursive(v reflect.Value) error {
 	return nil
 }
 
-// expandString performs the actual replacement for a single string.
-// Tracks unset variables for later reporting.
 func expandString(s string) string {
 	if !strings.Contains(s, "${") {
 		return s
@@ -194,7 +167,6 @@ func expandString(s string) string {
 		varName := match[2 : len(match)-1]
 		value := os.Getenv(varName)
 		if value == "" {
-			// Track unset variables (avoid duplicates)
 			found := false
 			for _, v := range unsetEnvVars {
 				if v == varName {
@@ -210,7 +182,6 @@ func expandString(s string) string {
 	})
 }
 
-// setDefaults applies sensible defaults
 func setDefaults(cfg *Config) {
 	if len(cfg.NATS.URLs) == 0 {
 		cfg.NATS.URLs = []string{"nats://localhost:4222"}
@@ -232,14 +203,11 @@ func setDefaults(cfg *Config) {
 	}
 }
 
-// validate ensures configuration is valid
 func validate(cfg *Config) error {
-	// NATS validation
 	if len(cfg.NATS.URLs) == 0 {
 		return fmt.Errorf("at least one NATS URL required")
 	}
 
-	// Auth method validation (only one allowed)
 	authCount := 0
 	if cfg.NATS.Username != "" {
 		authCount++
@@ -257,7 +225,6 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("only one NATS auth method allowed")
 	}
 
-	// Providers validation
 	if len(cfg.Providers) == 0 {
 		return fmt.Errorf("at least one provider required")
 	}
@@ -276,12 +243,10 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("provider %s: invalid type '%s' (must be 'oauth2' or 'custom-http')", p.ID, p.Type)
 		}
 
-		// Default kvKey to ID if not specified
 		if cfg.Providers[i].KVKey == "" {
 			cfg.Providers[i].KVKey = p.ID
 		}
 
-		// Type-specific validation
 		if p.Type == "oauth2" {
 			if p.TokenURL == "" {
 				return fmt.Errorf("provider %s: tokenUrl required for oauth2", p.ID)
@@ -295,7 +260,6 @@ func validate(cfg *Config) error {
 			if p.RefreshBefore == "" {
 				return fmt.Errorf("provider %s: refreshBefore required for oauth2", p.ID)
 			}
-			// Validate duration format
 			if _, err := time.ParseDuration(p.RefreshBefore); err != nil {
 				return fmt.Errorf("provider %s: invalid refreshBefore duration: %w", p.ID, err)
 			}
@@ -304,7 +268,7 @@ func validate(cfg *Config) error {
 				return fmt.Errorf("provider %s: authUrl required for custom-http", p.ID)
 			}
 			if cfg.Providers[i].Method == "" {
-				cfg.Providers[i].Method = "POST" // Default
+				cfg.Providers[i].Method = "POST"
 			}
 			if p.TokenPath == "" {
 				return fmt.Errorf("provider %s: tokenPath required for custom-http", p.ID)
@@ -318,12 +282,10 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	// Storage validation
 	if cfg.Storage.Bucket == "" {
 		return fmt.Errorf("storage bucket name cannot be empty")
 	}
 
-	// TLS validation
 	if cfg.NATS.TLS.Enable {
 		if cfg.NATS.TLS.CertFile != "" && cfg.NATS.TLS.KeyFile == "" {
 			return fmt.Errorf("NATS TLS key file required when cert file provided")
@@ -333,7 +295,6 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	// Validate creds file exists if specified
 	if cfg.NATS.CredsFile != "" {
 		if _, err := os.Stat(cfg.NATS.CredsFile); os.IsNotExist(err) {
 			return fmt.Errorf("NATS creds file does not exist: %s", cfg.NATS.CredsFile)

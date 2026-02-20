@@ -6,71 +6,67 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/spf13/viper"
 )
 
-func TestSetViperDefaults(t *testing.T) {
-	v := viper.New()
-	setViperDefaults(v)
+func TestNewDefaults(t *testing.T) {
+	cfg := newDefaults()
 
 	checks := []struct {
-		key  string
+		name string
+		got  any
 		want any
 	}{
-		{"nats.connection.maxReconnects", -1},
-		{"nats.connection.reconnectWait", DefaultReconnectWait},
-		{"nats.consumers.consumerPrefix", DefaultConsumerPrefix},
-		{"nats.consumers.workerCount", DefaultWorkerCount},
-		{"nats.consumers.fetchBatchSize", DefaultFetchBatchSize},
-		{"nats.consumers.fetchTimeout", DefaultFetchTimeout},
-		{"nats.consumers.maxAckPending", DefaultMaxAckPending},
-		{"nats.consumers.ackWaitTimeout", DefaultAckWaitTimeout},
-		{"nats.consumers.maxDeliver", DefaultMaxDeliver},
-		{"nats.consumers.deliverPolicy", DefaultDeliverPolicy},
-		{"nats.consumers.replayPolicy", DefaultReplayPolicy},
-		{"nats.publish.mode", DefaultPublishMode},
-		{"nats.publish.ackTimeout", DefaultPublishAckTimeout},
-		{"nats.publish.maxRetries", DefaultPublishMaxRetries},
-		{"nats.publish.retryBaseDelay", DefaultRetryBaseDelay},
-		{"nats.tls.enable", false},
-		{"http.server.address", DefaultHTTPServerAddress},
-		{"http.server.readTimeout", DefaultHTTPReadTimeout},
-		{"http.server.writeTimeout", DefaultHTTPWriteTimeout},
-		{"http.server.idleTimeout", DefaultHTTPIdleTimeout},
-		{"http.server.maxHeaderBytes", DefaultMaxHeaderBytes},
-		{"http.server.shutdownGracePeriod", DefaultHTTPShutdownGracePeriod},
-		{"http.server.inboundWorkerCount", 10},
-		{"http.server.inboundQueueSize", DefaultInboundQueueSize},
-		{"http.client.timeout", DefaultHTTPClientTimeout},
-		{"http.client.maxIdleConns", DefaultMaxIdleConns},
-		{"http.client.maxIdleConnsPerHost", DefaultMaxIdleConnsPerHost},
-		{"http.client.idleConnTimeout", DefaultHTTPIdleConnTimeout},
-		{"logging.level", DefaultLogLevel},
-		{"logging.encoding", DefaultLogEncoding},
-		{"logging.outputPath", DefaultLogOutput},
-		{"metrics.enabled", true},
-		{"metrics.address", DefaultMetricsAddress},
-		{"metrics.path", DefaultMetricsPath},
-		{"metrics.updateInterval", "15s"},
-		{"rules.kvBucket", "rules"},
-		{"security.verification.publicKeyHeader", DefaultPublicKeyHeader},
-		{"security.verification.signatureHeader", DefaultSignatureHeader},
-		{"forEach.maxIterations", DefaultForEachMaxIterations},
-		{"gateway.enabled", false},
-		{"authManager.enabled", false},
+		{"nats.connection.maxReconnects", cfg.NATS.Connection.MaxReconnects, -1},
+		{"nats.connection.reconnectWait", cfg.NATS.Connection.ReconnectWait, DefaultReconnectWait},
+		{"nats.consumers.consumerPrefix", cfg.NATS.Consumers.ConsumerPrefix, DefaultConsumerPrefix},
+		{"nats.consumers.workerCount", cfg.NATS.Consumers.WorkerCount, DefaultWorkerCount},
+		{"nats.consumers.fetchBatchSize", cfg.NATS.Consumers.FetchBatchSize, DefaultFetchBatchSize},
+		{"nats.consumers.fetchTimeout", cfg.NATS.Consumers.FetchTimeout, DefaultFetchTimeout},
+		{"nats.consumers.maxAckPending", cfg.NATS.Consumers.MaxAckPending, DefaultMaxAckPending},
+		{"nats.consumers.ackWaitTimeout", cfg.NATS.Consumers.AckWaitTimeout, DefaultAckWaitTimeout},
+		{"nats.consumers.maxDeliver", cfg.NATS.Consumers.MaxDeliver, DefaultMaxDeliver},
+		{"nats.consumers.deliverPolicy", cfg.NATS.Consumers.DeliverPolicy, DefaultDeliverPolicy},
+		{"nats.consumers.replayPolicy", cfg.NATS.Consumers.ReplayPolicy, DefaultReplayPolicy},
+		{"nats.publish.mode", cfg.NATS.Publish.Mode, DefaultPublishMode},
+		{"nats.publish.ackTimeout", cfg.NATS.Publish.AckTimeout, DefaultPublishAckTimeout},
+		{"nats.publish.maxRetries", cfg.NATS.Publish.MaxRetries, DefaultPublishMaxRetries},
+		{"nats.publish.retryBaseDelay", cfg.NATS.Publish.RetryBaseDelay, DefaultRetryBaseDelay},
+		{"nats.tls.enable", cfg.NATS.TLS.Enable, false},
+		{"http.server.address", cfg.HTTP.Server.Address, DefaultHTTPServerAddress},
+		{"http.server.readTimeout", cfg.HTTP.Server.ReadTimeout, DefaultHTTPReadTimeout},
+		{"http.server.writeTimeout", cfg.HTTP.Server.WriteTimeout, DefaultHTTPWriteTimeout},
+		{"http.server.idleTimeout", cfg.HTTP.Server.IdleTimeout, DefaultHTTPIdleTimeout},
+		{"http.server.maxHeaderBytes", cfg.HTTP.Server.MaxHeaderBytes, DefaultMaxHeaderBytes},
+		{"http.server.shutdownGracePeriod", cfg.HTTP.Server.ShutdownGracePeriod, DefaultHTTPShutdownGracePeriod},
+		{"http.server.inboundWorkerCount", cfg.HTTP.Server.InboundWorkerCount, 10},
+		{"http.server.inboundQueueSize", cfg.HTTP.Server.InboundQueueSize, DefaultInboundQueueSize},
+		{"http.client.timeout", cfg.HTTP.Client.Timeout, DefaultHTTPClientTimeout},
+		{"http.client.maxIdleConns", cfg.HTTP.Client.MaxIdleConns, DefaultMaxIdleConns},
+		{"http.client.maxIdleConnsPerHost", cfg.HTTP.Client.MaxIdleConnsPerHost, DefaultMaxIdleConnsPerHost},
+		{"http.client.idleConnTimeout", cfg.HTTP.Client.IdleConnTimeout, DefaultHTTPIdleConnTimeout},
+		{"logging.level", cfg.Logging.Level, DefaultLogLevel},
+		{"logging.encoding", cfg.Logging.Encoding, DefaultLogEncoding},
+		{"logging.outputPath", cfg.Logging.OutputPath, DefaultLogOutput},
+		{"metrics.enabled", cfg.Metrics.Enabled, true},
+		{"metrics.address", cfg.Metrics.Address, DefaultMetricsAddress},
+		{"metrics.path", cfg.Metrics.Path, DefaultMetricsPath},
+		{"metrics.updateInterval", cfg.Metrics.UpdateInterval, "15s"},
+		{"rules.kvBucket", cfg.Rules.KVBucket, "rules"},
+		{"security.verification.publicKeyHeader", cfg.Security.Verification.PublicKeyHeader, DefaultPublicKeyHeader},
+		{"security.verification.signatureHeader", cfg.Security.Verification.SignatureHeader, DefaultSignatureHeader},
+		{"forEach.maxIterations", cfg.ForEach.MaxIterations, DefaultForEachMaxIterations},
+		{"gateway.enabled", cfg.Gateway.Enabled, false},
+		{"authManager.enabled", cfg.AuthManager.Enabled, false},
 	}
 
 	for _, c := range checks {
-		got := v.Get(c.key)
-		if got != c.want {
-			t.Errorf("key %q = %v (%T), want %v (%T)", c.key, got, got, c.want, c.want)
+		if c.got != c.want {
+			t.Errorf("key %q = %v (%T), want %v (%T)", c.name, c.got, c.got, c.want, c.want)
 		}
 	}
 
-	urls := v.GetStringSlice("nats.urls")
-	if len(urls) != 1 || urls[0] != DefaultNATSURL {
-		t.Errorf("nats.urls = %v, want [%s]", urls, DefaultNATSURL)
+	if len(cfg.NATS.URLs) != 1 || cfg.NATS.URLs[0] != DefaultNATSURL {
+		t.Errorf("nats.urls = %v, want [%s]", cfg.NATS.URLs, DefaultNATSURL)
 	}
 }
 
@@ -111,17 +107,10 @@ func TestApplyConditionalDefaults(t *testing.T) {
 	})
 }
 
-// validConfig creates a minimal valid config by loading defaults through viper,
-// matching how Load() works in production.
 func validConfig() *Config {
-	v := viper.New()
-	setViperDefaults(v)
-	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		panic("failed to unmarshal defaults: " + err.Error())
-	}
-	applyConditionalDefaults(&cfg)
-	return &cfg
+	cfg := newDefaults()
+	applyConditionalDefaults(cfg)
+	return cfg
 }
 
 func TestValidateConfig(t *testing.T) {
@@ -460,60 +449,12 @@ func TestValidateConfigTLSFileExistence(t *testing.T) {
 	})
 }
 
-func TestLoadWithEnvOverrides(t *testing.T) {
-	dir := t.TempDir()
-	yamlPath := filepath.Join(dir, "config.yaml")
-	os.WriteFile(yamlPath, []byte(`
-nats:
-  tls:
-    enable: true
-logging:
-  level: warn
-`), 0o600)
-
-	t.Setenv("SHUNT_NATS_TLS_ENABLE", "false")
-	t.Setenv("SHUNT_LOGGING_LEVEL", "debug")
-
-	cfg, err := Load(yamlPath, nil)
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-
-	if cfg.NATS.TLS.Enable {
-		t.Error("expected SHUNT_NATS_TLS_ENABLE=false to override yaml tls.enable=true")
-	}
-	if cfg.Logging.Level != "debug" {
-		t.Errorf("expected SHUNT_LOGGING_LEVEL=debug to override yaml level=warn, got %s", cfg.Logging.Level)
-	}
-}
-
-func TestLoadWithViperOverrides(t *testing.T) {
-	dir := t.TempDir()
-	yamlPath := filepath.Join(dir, "config.yaml")
-	os.WriteFile(yamlPath, []byte(`
-logging:
-  level: warn
-`), 0o600)
-
-	v := viper.New()
-	v.Set("logging.level", "debug")
-
-	cfg, err := Load(yamlPath, v)
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-
-	if cfg.Logging.Level != "debug" {
-		t.Errorf("expected viper.Set to override file value, got %s", cfg.Logging.Level)
-	}
-}
-
 func TestLoadDefaultsWithoutConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	yamlPath := filepath.Join(dir, "config.yaml")
 	os.WriteFile(yamlPath, []byte("{}"), 0o600)
 
-	cfg, err := Load(yamlPath, nil)
+	cfg, err := Load(yamlPath)
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -529,5 +470,182 @@ func TestLoadDefaultsWithoutConfigFile(t *testing.T) {
 	}
 	if !cfg.Metrics.Enabled {
 		t.Error("Metrics.Enabled should default to true")
+	}
+}
+
+func TestLoadMissingConfigFileUsesDefaults(t *testing.T) {
+	cfg, err := Load("/nonexistent/config.yaml")
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if len(cfg.NATS.URLs) != 1 || cfg.NATS.URLs[0] != DefaultNATSURL {
+		t.Errorf("NATS URLs = %v, want [%s]", cfg.NATS.URLs, DefaultNATSURL)
+	}
+	if cfg.Logging.Level != DefaultLogLevel {
+		t.Errorf("Logging.Level = %s, want %s", cfg.Logging.Level, DefaultLogLevel)
+	}
+}
+
+func TestLoadYAMLOverridesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	os.WriteFile(yamlPath, []byte(`
+logging:
+  level: debug
+  encoding: console
+nats:
+  consumers:
+    workerCount: 8
+    fetchBatchSize: 64
+`), 0o600)
+
+	cfg, err := Load(yamlPath)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("Logging.Level = %s, want debug", cfg.Logging.Level)
+	}
+	if cfg.Logging.Encoding != "console" {
+		t.Errorf("Logging.Encoding = %s, want console", cfg.Logging.Encoding)
+	}
+	if cfg.NATS.Consumers.WorkerCount != 8 {
+		t.Errorf("WorkerCount = %d, want 8", cfg.NATS.Consumers.WorkerCount)
+	}
+	if cfg.NATS.Consumers.FetchBatchSize != 64 {
+		t.Errorf("FetchBatchSize = %d, want 64", cfg.NATS.Consumers.FetchBatchSize)
+	}
+
+	// Unset fields within a partially-specified section must keep defaults
+	if cfg.Logging.OutputPath != DefaultLogOutput {
+		t.Errorf("Logging.OutputPath = %s, want %s (default preserved)", cfg.Logging.OutputPath, DefaultLogOutput)
+	}
+	if cfg.NATS.Consumers.ConsumerPrefix != DefaultConsumerPrefix {
+		t.Errorf("ConsumerPrefix = %s, want %s (default preserved)", cfg.NATS.Consumers.ConsumerPrefix, DefaultConsumerPrefix)
+	}
+	if cfg.NATS.Consumers.FetchTimeout != DefaultFetchTimeout {
+		t.Errorf("FetchTimeout = %v, want %v (default preserved)", cfg.NATS.Consumers.FetchTimeout, DefaultFetchTimeout)
+	}
+	if cfg.NATS.Consumers.MaxDeliver != DefaultMaxDeliver {
+		t.Errorf("MaxDeliver = %d, want %d (default preserved)", cfg.NATS.Consumers.MaxDeliver, DefaultMaxDeliver)
+	}
+	if cfg.NATS.Consumers.DeliverPolicy != DefaultDeliverPolicy {
+		t.Errorf("DeliverPolicy = %s, want %s (default preserved)", cfg.NATS.Consumers.DeliverPolicy, DefaultDeliverPolicy)
+	}
+
+	// Entirely unmentioned sections must keep defaults
+	if cfg.Metrics.Address != DefaultMetricsAddress {
+		t.Errorf("Metrics.Address = %s, want %s", cfg.Metrics.Address, DefaultMetricsAddress)
+	}
+	if cfg.NATS.Publish.Mode != DefaultPublishMode {
+		t.Errorf("Publish.Mode = %s, want %s (default preserved)", cfg.NATS.Publish.Mode, DefaultPublishMode)
+	}
+}
+
+func TestLoadBoolTrueDefaultsPreserved(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("unmentioned bool-true fields get defaults", func(t *testing.T) {
+		yamlPath := filepath.Join(dir, "no-metrics.yaml")
+		os.WriteFile(yamlPath, []byte(`
+logging:
+  level: debug
+`), 0o600)
+
+		cfg, err := Load(yamlPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if !cfg.Metrics.Enabled {
+			t.Error("Metrics.Enabled should default to true when not in YAML")
+		}
+		if !cfg.KV.AutoProvision {
+			t.Error("KV.AutoProvision should default to true when not in YAML")
+		}
+	})
+
+	t.Run("explicit false is honored", func(t *testing.T) {
+		yamlPath := filepath.Join(dir, "disabled.yaml")
+		os.WriteFile(yamlPath, []byte(`
+metrics:
+  enabled: false
+kv:
+  autoProvision: false
+`), 0o600)
+
+		cfg, err := Load(yamlPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.Metrics.Enabled {
+			t.Error("Metrics.Enabled should be false when explicitly set")
+		}
+		if cfg.KV.AutoProvision {
+			t.Error("KV.AutoProvision should be false when explicitly set")
+		}
+	})
+
+	t.Run("explicit true is honored", func(t *testing.T) {
+		yamlPath := filepath.Join(dir, "enabled.yaml")
+		os.WriteFile(yamlPath, []byte(`
+metrics:
+  enabled: true
+kv:
+  autoProvision: true
+`), 0o600)
+
+		cfg, err := Load(yamlPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if !cfg.Metrics.Enabled {
+			t.Error("Metrics.Enabled should be true when explicitly set")
+		}
+		if !cfg.KV.AutoProvision {
+			t.Error("KV.AutoProvision should be true when explicitly set")
+		}
+	})
+}
+
+func TestApplyOverrides(t *testing.T) {
+	cfg := newDefaults()
+
+	enabled := true
+	wc := 16
+	cfg.ApplyOverrides(ServeOverrides{
+		NATSURLs:       []string{"nats://custom:4222"},
+		LogLevel:       "debug",
+		MetricsEnabled: &enabled,
+		MetricsAddr:    ":9090",
+		WorkerCount:    &wc,
+	})
+
+	if cfg.NATS.URLs[0] != "nats://custom:4222" {
+		t.Errorf("NATS.URLs = %v, want [nats://custom:4222]", cfg.NATS.URLs)
+	}
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("Logging.Level = %s, want debug", cfg.Logging.Level)
+	}
+	if !cfg.Metrics.Enabled {
+		t.Error("Metrics.Enabled should be true")
+	}
+	if cfg.Metrics.Address != ":9090" {
+		t.Errorf("Metrics.Address = %s, want :9090", cfg.Metrics.Address)
+	}
+	if cfg.NATS.Consumers.WorkerCount != 16 {
+		t.Errorf("WorkerCount = %d, want 16", cfg.NATS.Consumers.WorkerCount)
+	}
+}
+
+func TestApplyOverridesNilPointerSkips(t *testing.T) {
+	cfg := newDefaults()
+	original := cfg.Metrics.Enabled
+
+	cfg.ApplyOverrides(ServeOverrides{})
+
+	if cfg.Metrics.Enabled != original {
+		t.Errorf("Metrics.Enabled changed from %v to %v with nil override", original, cfg.Metrics.Enabled)
 	}
 }
