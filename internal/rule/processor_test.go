@@ -1658,3 +1658,94 @@ func TestReplaceRules_AtomicSwap(t *testing.T) {
 		t.Fatal("Expected v2 rules after atomic swap")
 	}
 }
+
+func TestProcessor_NATSAction_ModeCarryThrough(t *testing.T) {
+	processor := newTestProcessor()
+
+	t.Run("mode carried through simple action", func(t *testing.T) {
+		rule := Rule{
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "test.subject"}},
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "output.subject",
+					Mode:    "core",
+					Payload: `{"status": "ok"}`,
+				},
+			},
+		}
+
+		if err := processor.LoadRules([]Rule{rule}); err != nil {
+			t.Fatalf("Failed to load rule: %v", err)
+		}
+
+		actions, err := processor.ProcessNATS("test.subject", []byte(`{}`), nil)
+		if err != nil {
+			t.Fatalf("ProcessNATS failed: %v", err)
+		}
+		if len(actions) != 1 {
+			t.Fatalf("Expected 1 action, got %d", len(actions))
+		}
+		if actions[0].NATS.Mode != "core" {
+			t.Errorf("Expected mode 'core', got %q", actions[0].NATS.Mode)
+		}
+	})
+
+	t.Run("empty mode remains empty", func(t *testing.T) {
+		rule := Rule{
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "test.default"}},
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "output.default",
+					Payload: `{"status": "ok"}`,
+				},
+			},
+		}
+
+		if err := processor.LoadRules([]Rule{rule}); err != nil {
+			t.Fatalf("Failed to load rule: %v", err)
+		}
+
+		actions, err := processor.ProcessNATS("test.default", []byte(`{}`), nil)
+		if err != nil {
+			t.Fatalf("ProcessNATS failed: %v", err)
+		}
+		if len(actions) != 1 {
+			t.Fatalf("Expected 1 action, got %d", len(actions))
+		}
+		if actions[0].NATS.Mode != "" {
+			t.Errorf("Expected empty mode, got %q", actions[0].NATS.Mode)
+		}
+	})
+
+	t.Run("mode carried through forEach action", func(t *testing.T) {
+		rule := Rule{
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "test.foreach"}},
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "output.{id}",
+					Mode:    "jetstream",
+					ForEach: "{items}",
+					Payload: `{"id": "{id}"}`,
+				},
+			},
+		}
+
+		if err := processor.LoadRules([]Rule{rule}); err != nil {
+			t.Fatalf("Failed to load rule: %v", err)
+		}
+
+		payload := []byte(`{"items": [{"id": "a"}, {"id": "b"}]}`)
+		actions, err := processor.ProcessNATS("test.foreach", payload, nil)
+		if err != nil {
+			t.Fatalf("ProcessNATS failed: %v", err)
+		}
+		if len(actions) != 2 {
+			t.Fatalf("Expected 2 actions, got %d", len(actions))
+		}
+		for i, action := range actions {
+			if action.NATS.Mode != "jetstream" {
+				t.Errorf("Action %d: expected mode 'jetstream', got %q", i, action.NATS.Mode)
+			}
+		}
+	})
+}

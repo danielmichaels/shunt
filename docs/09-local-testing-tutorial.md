@@ -44,7 +44,7 @@ nats kv add rules
 
 ### Start Shunt (Terminal 3)
 ```bash
-SHUNT_LOGGING_LEVEL=debug SHUNT_LOGGING_ENCODING=console \
+SHUNT_LOG_LEVEL=debug \
   ./bin/shunt serve --nats-url nats://localhost:4222
 ```
 
@@ -334,22 +334,25 @@ nats kv put device_config sensor-42 '{
 }'
 ```
 
-**Important:** You need to restart Shunt (or update the config) so it watches these additional KV buckets. Either set the env var:
+**Important:** You need to restart Shunt with a config file so it watches these additional KV buckets. Create a `kv-config.yaml`:
 
-```bash
-export SHUNT_KV_BUCKETS="customer_data,device_config,system_config,feature_flags"
+```yaml
+kv:
+  enabled: true
+  buckets:
+    - customer_data
+    - device_config
+    - system_config
+    - feature_flags
 ```
-
-Or create a `config/shunt.yaml` (see `config/shunt.yaml.example` for reference) listing these buckets, then restart Shunt.
 
 ### Push rules + restart
 ```bash
 ./bin/shunt kv push rules/router/kv-json-path.yaml --nats-url nats://localhost:4222
 
-# Restart shunt with the KV buckets configured
-SHUNT_LOGGING_LEVEL=debug SHUNT_LOGGING_ENCODING=console \
-SHUNT_KV_ENABLED=true SHUNT_KV_AUTOPROVISION=true \
-  ./bin/shunt serve --nats-url nats://localhost:4222
+# Restart shunt with the KV config file
+SHUNT_LOG_LEVEL=debug \
+  ./bin/shunt serve --nats-url nats://localhost:4222 --config kv-config.yaml
 ```
 
 ### Test KV-enriched routing
@@ -415,7 +418,61 @@ nats pub sensors.data '{"sensor": {"id": "temp001", "reading": 32.5, "location":
 
 ---
 
-## Lesson 8: HTTP Gateway (bidirectional HTTP <> NATS)
+## Lesson 8: Per-Rule Publish Mode Override
+
+**New concepts:** `mode: core` vs `mode: jetstream` on individual NATS actions, mixed delivery guarantees from one trigger
+
+**Rule file:** `rules/router/mixed-mode.yaml`
+
+By default, all actions publish using the global `nats.publish.mode` (default: `jetstream`). Individual rules can override this with `mode: core` (fire-and-forget) or `mode: jetstream` (durable). This lets a single consumed message trigger rules with different delivery guarantees.
+
+### Setup
+```bash
+nats stream add NOTIFICATIONS --subjects "notifications.>" --defaults
+
+./bin/shunt kv push rules/router/mixed-mode.yaml --nats-url nats://localhost:4222
+```
+
+Note: we only create a stream for the `notifications.>` subject (used by the jetstream rule). The `dashboard.>` subject does not need a stream because that rule uses `mode: core`.
+
+### Subscribe to outputs (Terminal 4)
+```bash
+nats sub ">"
+```
+
+### Test it (Terminal 2)
+```bash
+# Publish a door access event
+nats pub access.door.front '{"door_id": "front", "event": "opened", "user": "alice"}'
+```
+
+**What to observe:**
+- Two outputs appear: one on `notifications.access.log` (jetstream) and one on `dashboard.door.status.front` (core)
+- In the Shunt debug logs, you'll see `per-rule mode override active` for each action, showing the rule mode vs global mode
+- The dashboard message is fire-and-forget — if no subscriber is listening, it's silently dropped
+- The notification message is durable — JetStream acknowledges it and it persists in the NOTIFICATIONS stream
+
+### Test core vs jetstream behavior
+```bash
+# Stop the subscriber in Terminal 4 (Ctrl+C), then publish again
+nats pub access.door.front '{"door_id": "front", "event": "closed", "user": "alice"}'
+
+# Now restart the subscriber
+nats sub ">"
+
+# The dashboard message is gone (core = no persistence)
+# But check the notifications stream — the jetstream message persists:
+nats stream view NOTIFICATIONS
+```
+
+### Cleanup
+```bash
+./bin/shunt kv delete router.mixed-mode --nats-url nats://localhost:4222
+```
+
+---
+
+## Lesson 9: HTTP Gateway (bidirectional HTTP <> NATS)
 
 **New concepts:** HTTP triggers (inbound webhooks), HTTP actions (outbound calls), `@header.*`, `@path.*`, `@method`, retry config
 
@@ -427,9 +484,8 @@ The HTTP gateway is an optional subsystem. Enable it:
 ```bash
 ./bin/shunt kv push rules/http/webhooks.yaml --nats-url nats://localhost:4222
 
-SHUNT_LOGGING_LEVEL=debug SHUNT_LOGGING_ENCODING=console \
-SHUNT_GATEWAY_ENABLED=true \
-  ./bin/shunt serve --nats-url nats://localhost:4222
+SHUNT_LOG_LEVEL=debug \
+  ./bin/shunt serve --nats-url nats://localhost:4222 --gateway-enabled
 ```
 
 ### Subscribe to see inbound webhook results
@@ -478,8 +534,9 @@ curl -X POST http://localhost:8080/webhooks/generic \
 | `./bin/shunt kv list` | List all rules in KV |
 | `./bin/shunt kv pull <key>` | Pull a specific rule |
 | `./bin/shunt kv delete <key>` | Delete a rule |
-| `./bin/shunt lint --rules <dir>` | Validate rules offline |
-| `./bin/shunt new <name>` | Generate a rule template |
+| `./bin/shunt lint -r <dir>` | Validate rules offline |
+| `./bin/shunt new -t <template>` | Generate a rule from template |
+| `./bin/shunt new -i` | Interactive rule builder |
 | `nats pub <subject> '<json>'` | Publish a test message |
 | `nats sub "<pattern>"` | Subscribe to see routed output |
 | `nats kv put <bucket> <key> '<json>'` | Seed KV data |
@@ -521,7 +578,7 @@ curl -X POST http://localhost:8080/webhooks/generic \
 
 **"stream not found" errors:** Create a JetStream stream covering the trigger subject. Shunt uses pull consumers which require streams.
 
-**Rule not firing:** Check `./bin/shunt lint --rules <dir>` for validation errors. Ensure the KV bucket name matches (`rules` by default).
+**Rule not firing:** Check `./bin/shunt lint -r <dir>` for validation errors. Ensure the KV bucket name matches (`rules` by default).
 
 **KV enrichment returning empty:** Ensure the KV data bucket is listed in config (`kv.buckets`) and Shunt was restarted after adding it.
 

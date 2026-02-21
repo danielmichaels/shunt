@@ -1808,6 +1808,91 @@ func TestExpandEnvironmentVariables_Public(t *testing.T) {
 	}
 }
 
+// TestNATSAction_ModeValidation tests the mode field validation on NATS actions
+func TestNATSAction_ModeValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		ruleContent string
+		shouldPass  bool
+		errMsg      string
+	}{
+		{
+			name: "valid mode core",
+			ruleContent: `
+- trigger:
+    nats:
+      subject: sensors.temp
+  action:
+    nats:
+      subject: alerts.temp
+      mode: core
+      payload: "{}"`,
+			shouldPass: true,
+		},
+		{
+			name: "valid mode jetstream",
+			ruleContent: `
+- trigger:
+    nats:
+      subject: sensors.temp
+  action:
+    nats:
+      subject: alerts.temp
+      mode: jetstream
+      payload: "{}"`,
+			shouldPass: true,
+		},
+		{
+			name: "omitted mode uses global default",
+			ruleContent: `
+- trigger:
+    nats:
+      subject: sensors.temp
+  action:
+    nats:
+      subject: alerts.temp
+      payload: "{}"`,
+			shouldPass: true,
+		},
+		{
+			name: "invalid mode rejected",
+			ruleContent: `
+- trigger:
+    nats:
+      subject: sensors.temp
+  action:
+    nats:
+      subject: alerts.temp
+      mode: invalid
+      payload: "{}"`,
+			shouldPass: false,
+			errMsg:     "NATS action mode must be",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			loader := newTestLoader()
+			tempDir := t.TempDir()
+			createTempRuleFile(t, tempDir, "test.yaml", tt.ruleContent)
+
+			_, err := loader.LoadFromDirectory(tempDir)
+
+			if tt.shouldPass {
+				if err != nil {
+					t.Errorf("Expected rule to pass validation, but got error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Expected validation error containing '%s', but got nil", tt.errMsg)
+				} else if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error to contain '%s', but got: %v", tt.errMsg, err)
+				}
+			}
+		})
+	}
+}
+
 // TestOperatorWhitelist_IncludesArrayOperators verifies array operators are in whitelist
 func TestOperatorWhitelist_IncludesArrayOperators(t *testing.T) {
 	loader := newTestLoader()

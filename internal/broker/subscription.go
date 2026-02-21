@@ -461,6 +461,13 @@ func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, actio
 	maxRetries := sm.publishCfg.MaxRetries
 	baseDelay := sm.publishCfg.RetryBaseDelay
 	publishMode := sm.publishCfg.Mode
+	if action.Mode != "" {
+		sm.logger.Debug("per-rule mode override active",
+			"subject", action.Subject,
+			"ruleMode", action.Mode,
+			"globalMode", sm.publishCfg.Mode)
+		publishMode = action.Mode
+	}
 
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -469,9 +476,13 @@ func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, actio
 		}
 
 		var err error
-		if publishMode == "core" {
+		switch publishMode {
+		case "core":
 			err = sm.publishCore(ctx, action)
-		} else {
+		case "jetstream":
+			err = sm.publishJetStream(ctx, action)
+		default:
+			sm.logger.Warn("unknown publish mode, falling back to jetstream", "mode", publishMode)
 			err = sm.publishJetStream(ctx, action)
 		}
 

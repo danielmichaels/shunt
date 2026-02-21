@@ -12,7 +12,7 @@ Rules are stored in NATS KV and hot-reloaded via KV Watch — no restarts requir
 *   **Primitive Message Support**: Handle strings, numbers, arrays, and objects at the root.
 *   **HTTP Gateway** (optional subsystem): Bidirectional HTTP-to-NATS bridge with inbound webhook ingestion and outbound API calls.
 *   **Auth Manager** (optional subsystem): OAuth2 and custom-HTTP token management, stored in NATS KV.
-*   **NATS JetStream Native**: Pull consumers for durable, scalable message processing.
+*   **NATS JetStream Native**: Pull consumers for durable, scalable message processing. Per-rule publish mode override (`core` or `jetstream`) for mixed delivery guarantees.
 *   **Rule Engine**: Dynamic conditions, payload/header/subject templating, KV data enrichment with local cache, time-based logic.
 *   **Cryptographic Security**: NKey signature verification for message integrity.
 *   **Production Ready**: Structured logging, Prometheus metrics, graceful shutdown, full NATS auth support.
@@ -88,7 +88,7 @@ Write a rule file and push it to NATS KV:
 Or with env vars:
 
 ```bash
-SHUNT_NATS_URLS=nats://localhost:4222 SHUNT_METRICS_ENABLED=true ./shunt serve
+SHUNT_NATS_URL=nats://localhost:4222 SHUNT_METRICS_ENABLED=true ./shunt serve
 ```
 
 ## Container Image
@@ -97,7 +97,7 @@ SHUNT_NATS_URLS=nats://localhost:4222 SHUNT_METRICS_ENABLED=true ./shunt serve
 docker pull ghcr.io/danielmichaels/shunt:latest
 
 docker run --rm \
-  -e SHUNT_NATS_URLS=nats://nats:4222 \
+  -e SHUNT_NATS_URL=nats://nats:4222 \
   -e SHUNT_METRICS_ENABLED=true \
   -p 2112:2112 \
   ghcr.io/danielmichaels/shunt:latest
@@ -110,7 +110,7 @@ services:
   shunt:
     image: ghcr.io/danielmichaels/shunt:latest
     environment:
-      SHUNT_NATS_URLS: nats://nats:4222
+      SHUNT_NATS_URL: nats://nats:4222
       SHUNT_METRICS_ENABLED: "true"
       SHUNT_GATEWAY_ENABLED: "true"
     ports:

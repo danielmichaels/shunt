@@ -315,12 +315,13 @@ func (rb *RuleBuilder) getNATSAction() (*rule.NATSAction, error) {
 	cardinality, _ := rb.prompter.Select("Select Action Cardinality:", []string{"Single Action", "ForEach (Batch) Action"})
 	if cardinality == 0 { // Single
 		subject, _ := rb.prompter.Ask("Enter NATS Action Subject (e.g., 'alerts.high_temp.{device_id}'):")
+		mode := rb.getPublishMode()
 		payload := `{
   "message": "Rule matched and processed.",
   "device_id": "{device_id}",
   "processed_at": "{@timestamp()}"
 }`
-		return &rule.NATSAction{Subject: subject, Payload: payload}, nil
+		return &rule.NATSAction{Subject: subject, Mode: mode, Payload: payload}, nil
 	}
 
 	// ForEach
@@ -330,12 +331,13 @@ func (rb *RuleBuilder) getNATSAction() (*rule.NATSAction, error) {
 	}
 
 	subject, _ := rb.prompter.Ask("Enter NATS Action Subject (can use element fields, e.g., 'alerts.{id}'):")
+	mode := rb.getPublishMode()
 	payload := `{
   "element_id": "{id}",
   "batch_id": "{@msg.batch_id}",
   "processed_at": "{@timestamp()}"
 }`
-	action := &rule.NATSAction{ForEach: forEachField, Subject: subject, Payload: payload}
+	action := &rule.NATSAction{ForEach: forEachField, Subject: subject, Mode: mode, Payload: payload}
 
 	addFilter, _ := rb.prompter.Confirm("Add a filter to process only some elements?")
 	if addFilter {
@@ -351,6 +353,22 @@ func (rb *RuleBuilder) getNATSAction() (*rule.NATSAction, error) {
 		action.Filter = filter
 	}
 	return action, nil
+}
+
+func (rb *RuleBuilder) getPublishMode() string {
+	modeIdx, _ := rb.prompter.Select("Publish mode:", []string{
+		"Default (use global config)",
+		"core (fire-and-forget)",
+		"jetstream (durable)",
+	})
+	switch modeIdx {
+	case 1:
+		return "core"
+	case 2:
+		return "jetstream"
+	default:
+		return ""
+	}
 }
 
 func (rb *RuleBuilder) getHTTPAction() (*rule.HTTPAction, error) {

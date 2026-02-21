@@ -1,0 +1,22 @@
+# Mixed publish mode: one trigger, two delivery guarantees.
+# Message: {"door_id": "front", "event": "opened", "user": "alice"}
+
+# Durable audit log — must not be lost
+- trigger:
+    nats:
+      subject: access.door.>
+  action:
+    nats:
+      subject: notifications.access.log
+      mode: jetstream
+      payload: '{"door": "{door_id}", "action": "{event}", "user": "{user}", "time": "{@timestamp()}"}'
+
+# Live dashboard — ephemeral, no stream needed
+- trigger:
+    nats:
+      subject: access.door.>
+  action:
+    nats:
+      subject: dashboard.door.status.{door_id}
+      mode: core
+      payload: '{"door": "{door_id}", "state": "{event}"}'

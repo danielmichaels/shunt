@@ -40,6 +40,7 @@ type Action struct {
 // NATSAction represents publishing to a NATS subject
 type NATSAction struct {
 	Subject     string            `json:"subject" yaml:"subject"`
+	Mode        string            `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Payload     string            `json:"payload,omitempty" yaml:"payload,omitempty"`
 	Passthrough bool              `json:"passthrough,omitempty" yaml:"passthrough,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
