@@ -3,7 +3,6 @@ name: Build and Push Container
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -51,8 +50,6 @@ jobs:
           tags: |
             type=raw,value=latest
             type=sha,prefix=
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
 
       - uses: docker/build-push-action@v6
         with:
