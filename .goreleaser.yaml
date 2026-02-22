@@ -47,6 +47,7 @@ dockers_v2:
     platforms:
       - linux/amd64
       - linux/arm64
+    sbom: false
     labels:
       "org.opencontainers.image.source": "https://github.com/danielmichaels/shunt"
       "org.opencontainers.image.version": "{{ .Version }}"
