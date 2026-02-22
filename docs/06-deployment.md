@@ -21,14 +21,18 @@ nats kv add feature_flags
 
 ### JetStream Streams
 
-Create streams for every subject your rules trigger on or publish to via JetStream:
+Streams are required for two things:
+
+1. **Trigger subjects** — shunt always creates JetStream pull consumers to receive messages, so every trigger subject must be covered by a stream.
+2. **Output subjects using `mode: jetstream`** — JetStream publish requires a stream on the target subject.
+
+Output subjects using `mode: core` publish via core NATS (fire-and-forget) and do **not** need a stream.
 
 ```bash
+# Example: streams covering trigger and JetStream-output subjects
 nats stream add EVENTS --subjects "events.>"
 nats stream add ALERTS --subjects "alerts.>"
 ```
-
-Rules that set `mode: core` on their NATS action publish via core NATS, not JetStream. Output subjects for those rules do **not** need a stream — only trigger subjects (which always use JetStream pull consumers) and `mode: jetstream` output subjects require streams.
 
 As an alternative to imperative `nats` CLI commands, consider [declarative JetStream configuration](https://docs.nats.io/running-a-nats-service/configuration/resource_management) managed alongside your NATS server config.
 
