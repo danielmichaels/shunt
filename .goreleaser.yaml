@@ -37,20 +37,35 @@ changelog:
       - "^ci:"
       - "^chore:"
 
-dockers_v2:
-  - dockerfile: Dockerfile.goreleaser
-    images:
-      - "ghcr.io/danielmichaels/shunt"
-    tags:
-      - "v{{ .Version }}"
-      - "v{{ .Major }}.{{ .Minor }}"
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    sbom: false
-    labels:
-      "org.opencontainers.image.source": "https://github.com/danielmichaels/shunt"
-      "org.opencontainers.image.version": "{{ .Version }}"
+dockers:
+  - use: buildx
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - "ghcr.io/danielmichaels/shunt:v{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/danielmichaels/shunt"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+    goarch: amd64
+  - use: buildx
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - "ghcr.io/danielmichaels/shunt:v{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/danielmichaels/shunt"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "ghcr.io/danielmichaels/shunt:v{{ .Version }}"
+    image_templates:
+      - "ghcr.io/danielmichaels/shunt:v{{ .Version }}-amd64"
+      - "ghcr.io/danielmichaels/shunt:v{{ .Version }}-arm64"
+  - name_template: "ghcr.io/danielmichaels/shunt:v{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/danielmichaels/shunt:v{{ .Version }}-amd64"
+      - "ghcr.io/danielmichaels/shunt:v{{ .Version }}-arm64"
 
 release:
   github:
