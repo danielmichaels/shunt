@@ -32,9 +32,9 @@ shunt.local.yaml
 bin/
 
 
-.goreleaser.yaml
 # Editor/IDE
 .idea/
 # .vscode/
 tmp
 .task
+dist

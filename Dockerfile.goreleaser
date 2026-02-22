@@ -1,8 +1,4 @@
 FROM gcr.io/distroless/static-debian12:nonroot
-
-ARG TARGETPLATFORM
-COPY $TARGETPLATFORM/shunt /shunt
-
+COPY shunt /shunt
 EXPOSE 2112 8080
-
 ENTRYPOINT ["/shunt"]
