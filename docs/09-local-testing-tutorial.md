@@ -33,6 +33,9 @@ task build:shunt
 This rule watches `sensors.data` and routes high bedroom temperatures to `alerts.bedroom-temperature`.
 
 ### Setup streams + KV + push rule
+
+Streams are needed for trigger subjects (pull consumers require them) and for output subjects that publish via JetStream (the default mode). Both streams below are required — SENSORS covers the trigger and ALERTS covers the JetStream output.
+
 ```bash
 nats stream add SENSORS --subjects "sensors.>" --defaults
 nats stream add ALERTS  --subjects "alerts.>"  --defaults
@@ -576,7 +579,7 @@ curl -X POST http://localhost:8080/webhooks/generic \
 
 ## Troubleshooting
 
-**"stream not found" errors:** Create a JetStream stream covering the trigger subject. Shunt uses pull consumers which require streams.
+**"stream not found" errors:** Streams are required for trigger subjects (pull consumers need them) and for output subjects that use `mode: jetstream` (the default). Create a stream whose subject filter covers the subject in question. Output subjects using `mode: core` do not need a stream.
 
 **Rule not firing:** Check `./bin/shunt lint -r <dir>` for validation errors. Ensure the KV bucket name matches (`rules` by default).
 
