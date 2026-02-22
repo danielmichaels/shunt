@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/alecthomas/kong"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,6 +17,14 @@ type KVPullCmd struct {
 	Key    string `arg:"" optional:"" help:"Key to pull (omit for all)"`
 	Output string `short:"o" default:"." help:"Output directory for downloaded rule files"`
 	Format string `short:"f" default:"" help:"Output format to stdout instead of files (yaml or json)"`
+}
+
+func (p *KVPullCmd) BeforeApply(ctx *kong.Context) error {
+	if p.Key == "--help" || p.Key == "-h" {
+		_ = ctx.PrintUsage(false)
+		ctx.Kong.Exit(0)
+	}
+	return nil
 }
 
 func (p *KVPullCmd) Run(kv *KVCmd) error {

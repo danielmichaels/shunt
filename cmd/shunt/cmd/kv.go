@@ -14,15 +14,18 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/synadia-io/orbit.go/natscontext"
 )
 
 const kvOperationTimeout = 10 * time.Second
 
 type KVCmd struct {
-	NatsURL string `name:"nats-url" default:"nats://localhost:4222" env:"SHUNT_NATS_URL,NATS_URL" help:"NATS server URL"`
-	Creds   string `env:"SHUNT_NATS_CREDS,NATS_CREDS" help:"Path to NATS credentials file"`
-	NKey    string `name:"nkey" env:"SHUNT_NATS_NKEY,NATS_NKEY" help:"NATS NKey seed"`
-	Bucket  string `default:"rules" help:"KV bucket name"`
+	NatsURL   string `name:"nats-url" env:"SHUNT_NATS_URL,NATS_URL" help:"NATS server URL (overrides context)"`
+	Creds     string `env:"SHUNT_NATS_CREDS,NATS_CREDS" help:"Path to NATS credentials file"`
+	NKey      string `name:"nkey" env:"SHUNT_NATS_NKEY,NATS_NKEY" help:"NATS NKey seed"`
+	Context   string `name:"context" env:"NATS_CONTEXT" help:"NATS context name"`
+	NoContext bool   `name:"no-context" help:"Disable NATS context loading"`
+	Bucket    string `default:"rules" help:"KV bucket name"`
 
 	Push   KVPushCmd   `cmd:"" help:"Push rules to KV bucket" aliases:"put"`
 	Pull   KVPullCmd   `cmd:"" help:"Pull rules from KV bucket" aliases:"get"`
@@ -31,6 +34,37 @@ type KVCmd struct {
 }
 
 func (k *KVCmd) connectNATS() (*nats.Conn, error) {
+	if k.NoContext || k.NatsURL != "" {
+		return k.directConnect()
+	}
+
+	var extraOpts []nats.Option
+	if k.Creds != "" {
+		extraOpts = append(extraOpts, nats.UserCredentials(k.Creds))
+	}
+	if k.NKey != "" {
+		nkeyOpt, err := nats.NkeyOptionFromSeed(k.NKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load NKey seed file: %w", err)
+		}
+		extraOpts = append(extraOpts, nkeyOpt)
+	}
+
+	nc, _, err := natscontext.Connect(k.Context, extraOpts...)
+	if err != nil {
+		if k.Context != "" {
+			return nil, fmt.Errorf("NATS context %q: %w", k.Context, err)
+		}
+		return k.directConnect()
+	}
+	return nc, nil
+}
+
+func (k *KVCmd) directConnect() (*nats.Conn, error) {
+	url := k.NatsURL
+	if url == "" {
+		url = natsutil.DefaultURL
+	}
 	opts, err := natsutil.BuildAuthTLSOptions(natsutil.AuthTLSConfig{
 		CredsFile: k.Creds,
 		NKey:      k.NKey,
@@ -38,12 +72,10 @@ func (k *KVCmd) connectNATS() (*nats.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	nc, err := nats.Connect(k.NatsURL, opts...)
+	nc, err := nats.Connect(url, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS at %s: %w", k.NatsURL, err)
+		return nil, fmt.Errorf("failed to connect to NATS at %s: %w", url, err)
 	}
-
 	return nc, nil
 }
 

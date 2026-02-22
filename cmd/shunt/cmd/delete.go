@@ -6,11 +6,21 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/alecthomas/kong"
 )
 
 type KVDeleteCmd struct {
 	Key   string `arg:"" help:"Key to delete"`
 	Force bool   `help:"Skip confirmation prompt"`
+}
+
+func (d *KVDeleteCmd) BeforeApply(ctx *kong.Context) error {
+	if d.Key == "--help" || d.Key == "-h" {
+		_ = ctx.PrintUsage(false)
+		ctx.Kong.Exit(0)
+	}
+	return nil
 }
 
 func (d *KVDeleteCmd) Run(kv *KVCmd) error {
