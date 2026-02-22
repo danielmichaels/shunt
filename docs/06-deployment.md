@@ -21,9 +21,15 @@ nats kv add feature_flags
 
 ### JetStream Streams
 
-Create streams for every subject your rules trigger on or publish to:
+Streams are required for two things:
+
+1. **Trigger subjects** — shunt always creates JetStream pull consumers to receive messages, so every trigger subject must be covered by a stream.
+2. **Output subjects using `mode: jetstream`** — JetStream publish requires a stream on the target subject.
+
+Output subjects using `mode: core` publish via core NATS (fire-and-forget) and do **not** need a stream.
 
 ```bash
+# Example: streams covering trigger and JetStream-output subjects
 nats stream add EVENTS --subjects "events.>"
 nats stream add ALERTS --subjects "alerts.>"
 ```
@@ -42,7 +48,7 @@ docker pull ghcr.io/danielmichaels/shunt:latest
 
 ```bash
 docker run --rm \
-  -e SHUNT_NATS_URLS=nats://nats:4222 \
+  -e SHUNT_NATS_URL=nats://nats:4222 \
   -e SHUNT_METRICS_ENABLED=true \
   -p 2112:2112 \
   ghcr.io/danielmichaels/shunt:latest
@@ -52,7 +58,7 @@ To enable the HTTP gateway subsystem:
 
 ```bash
 docker run --rm \
-  -e SHUNT_NATS_URLS=nats://nats:4222 \
+  -e SHUNT_NATS_URL=nats://nats:4222 \
   -e SHUNT_GATEWAY_ENABLED=true \
   -e SHUNT_METRICS_ENABLED=true \
   -p 8080:8080 \
@@ -73,44 +79,54 @@ A reference config with all available options and documentation is provided at `
 
 ## Configuration in Containers
 
-Every scalar config key can be set via environment variables with the `SHUNT_` prefix. Nested keys use `_` as a separator. No config file is required — shunt starts with sane defaults and gracefully handles a missing file.
+Shunt uses a layered configuration model:
 
-| Config Key | Env Var | Example |
-|---|---|---|
-| `nats.urls` | `SHUNT_NATS_URLS` | `nats://nats:4222` |
-| `nats.credsFile` | `SHUNT_NATS_CREDSFILE` | `/etc/nats/creds/user.creds` |
-| `nats.consumers.workerCount` | `SHUNT_NATS_CONSUMERS_WORKERCOUNT` | `8` |
-| `nats.consumers.fetchBatchSize` | `SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE` | `64` |
-| `logging.level` | `SHUNT_LOGGING_LEVEL` | `debug` |
-| `metrics.enabled` | `SHUNT_METRICS_ENABLED` | `true` |
-| `metrics.address` | `SHUNT_METRICS_ADDRESS` | `:2112` |
-| `gateway.enabled` | `SHUNT_GATEWAY_ENABLED` | `true` |
-| `rules.kvBucket` | `SHUNT_RULES_KVBUCKET` | `rules` |
+1. **YAML config file** — full configuration, all options supported
+2. **CLI flags** — a subset of commonly-used options that override the config file
+3. **Environment variables** — each CLI flag has a corresponding `SHUNT_`-prefixed env var
 
-`SHUNT_NATS_URLS` accepts a comma-separated string for multiple servers (e.g. `nats://s1:4222,nats://s2:4222`).
+No config file is required — shunt starts with sane defaults and gracefully handles a missing file. For simple deployments, CLI flags (via env vars) are sufficient. For advanced tuning, mount a YAML config file.
 
-List values like `kv.buckets` cannot be set via a single env var — use a config file for those.
+### Available Environment Variables
+
+Only `serve` command CLI flags have env var equivalents. These override the corresponding config file values:
+
+| CLI Flag | Env Var | Config Key | Example |
+|---|---|---|---|
+| `--nats-url` | `SHUNT_NATS_URL` | `nats.urls` | `nats://nats:4222` |
+| `--log-level` | `SHUNT_LOG_LEVEL` | `logging.level` | `debug` |
+| `--metrics-enabled` | `SHUNT_METRICS_ENABLED` | `metrics.enabled` | `true` |
+| `--metrics-addr` | `SHUNT_METRICS_ADDR` | `metrics.address` | `:2112` |
+| `--metrics-path` | `SHUNT_METRICS_PATH` | `metrics.path` | `/metrics` |
+| `--gateway-enabled` | `SHUNT_GATEWAY_ENABLED` | `gateway.enabled` | `true` |
+| `--kv-enabled` | `SHUNT_KV_ENABLED` | `kv.enabled` | `true` |
+| `--worker-count` | `SHUNT_WORKER_COUNT` | `nats.consumers.workerCount` | `8` |
+| `-c` / `--config` | `SHUNT_CONFIG` | — | `/etc/shunt/shunt.yaml` |
+
+`SHUNT_NATS_URL` accepts a comma-separated string for multiple servers (e.g. `nats://s1:4222,nats://s2:4222`).
 
 ### Defaults vs Production Tuning
 
-The built-in defaults are conservative. For production workloads, consider overriding the following via env vars:
+The built-in defaults are conservative. For production workloads, consider overriding:
 
-| Setting | Default | Recommended | Env Var |
+| Setting | Default | Recommended | Env Var / Config |
 |---|---|---|---|
-| `nats.consumers.workerCount` | `2` | `8` (2-4x CPU cores) | `SHUNT_NATS_CONSUMERS_WORKERCOUNT` |
-| `nats.consumers.fetchBatchSize` | `1` | `64` (higher throughput) | `SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE` |
-| `kv.enabled` | `false` | `true` if using KV enrichment | `SHUNT_KV_ENABLED` |
-| `gateway.enabled` | `false` | `true` for HTTP ingest | `SHUNT_GATEWAY_ENABLED` |
-| `security.verification.enabled` | `false` | `true` for signed messages | `SHUNT_SECURITY_VERIFICATION_ENABLED` |
+| Worker count | `2` | `8` (2-4x CPU cores) | `SHUNT_WORKER_COUNT` |
+| Fetch batch size | `1` | `64` (higher throughput) | config file: `nats.consumers.fetchBatchSize` |
+| KV enrichment | `false` | `true` if using KV enrichment | `SHUNT_KV_ENABLED` |
+| HTTP gateway | `false` | `true` for HTTP ingest | `SHUNT_GATEWAY_ENABLED` |
+| Signature verification | `false` | `true` for signed messages | config file: `security.verification.enabled` |
 
 ### When You Need a Config File
 
-A config file is only required for values that cannot be expressed as a single env var:
+A config file is required for settings that don't have a CLI flag, including:
 
-- **`kv.buckets`** — list of KV bucket names to watch for enrichment data
+- **`nats.credsFile`** — NATS JWT credentials path
+- **`nats.consumers.fetchBatchSize`** — messages per pull request
+- **`kv.buckets`** — list of KV bucket names for enrichment
 - **`authManager.providers`** — OAuth/HTTP provider definitions
-
-For everything else, env vars are sufficient.
+- **`security.verification.*`** — signature verification settings
+- All other deeply-nested options (TLS, HTTP server/client tuning, etc.)
 
 See [Configuration Reference](./07-configuration.md) for the complete list of all settings.
 
@@ -161,7 +177,7 @@ The metrics endpoint is available when `metrics.enabled` is `true` (the default)
 
 ### Env-Var-Only (No Config File)
 
-The simplest deployment uses only env vars. This works for any setup that doesn't require KV enrichment or auth providers:
+The simplest deployment uses only env vars. This works for any setup that doesn't require KV enrichment, auth providers, or advanced tuning:
 
 ```yaml
 apiVersion: apps/v1
@@ -191,16 +207,14 @@ spec:
             - containerPort: 2112
               name: metrics
           env:
-            - name: SHUNT_NATS_URLS
+            - name: SHUNT_NATS_URL
               value: "nats://nats:4222"
             - name: SHUNT_GATEWAY_ENABLED
               value: "true"
             - name: SHUNT_METRICS_ENABLED
               value: "true"
-            - name: SHUNT_NATS_CONSUMERS_WORKERCOUNT
+            - name: SHUNT_WORKER_COUNT
               value: "8"
-            - name: SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE
-              value: "64"
           livenessProbe:
             httpGet:
               path: /healthz
@@ -217,21 +231,38 @@ spec:
 
 ### With Credentials File
 
-For NATS JWT authentication, mount a `.creds` file from a Secret:
+For NATS JWT authentication, mount a `.creds` file from a Secret and reference it via a config file (the `nats.credsFile` setting requires a config file — it has no CLI flag or env var):
 
 ```yaml
-env:
-  - name: SHUNT_NATS_CREDSFILE
-    value: "/etc/nats/creds/shunt.creds"
+args: ["serve", "--config", "/etc/shunt/shunt.yaml"]
 volumeMounts:
   - name: nats-creds
     mountPath: /etc/nats/creds
+    readOnly: true
+  - name: config
+    mountPath: /etc/shunt
     readOnly: true
 # ...
 volumes:
   - name: nats-creds
     secret:
       secretName: shunt-nats-creds
+  - name: config
+    configMap:
+      name: shunt-config
+```
+
+The ConfigMap for credentials:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shunt-config
+data:
+  shunt.yaml: |
+    nats:
+      credsFile: /etc/nats/creds/shunt.creds
 ```
 
 Create the Secret from your `.creds` file:
@@ -243,18 +274,16 @@ kubectl create secret generic shunt-nats-creds \
 
 ### With Config File (KV Enrichment)
 
-If you use KV enrichment, `kv.buckets` requires a config file since lists cannot be set via a single env var. Mount a ConfigMap:
+If you use KV enrichment, `kv.buckets` requires a config file since lists cannot be set via a single env var. Mount a ConfigMap and use env vars for the remaining overrides:
 
 ```yaml
 env:
-  - name: SHUNT_NATS_URLS
+  - name: SHUNT_NATS_URL
     value: "nats://nats:4222"
   - name: SHUNT_GATEWAY_ENABLED
     value: "true"
-  - name: SHUNT_NATS_CONSUMERS_WORKERCOUNT
+  - name: SHUNT_WORKER_COUNT
     value: "8"
-  - name: SHUNT_NATS_CONSUMERS_FETCHBATCHSIZE
-    value: "64"
 args: ["serve", "--config", "/etc/shunt/shunt.yaml"]
 volumeMounts:
   - name: config
@@ -405,10 +434,16 @@ jobs:
         run: go install github.com/danielmichaels/shunt/cmd/shunt@latest
 
       - name: Lint rules
-        run: shunt lint sensors/ alerts/ webhooks/
+        run: |
+          shunt lint -r sensors/
+          shunt lint -r alerts/
+          shunt lint -r webhooks/
 
       - name: Run rule tests
-        run: shunt test sensors/ alerts/ webhooks/
+        run: |
+          shunt test -r sensors/
+          shunt test -r alerts/
+          shunt test -r webhooks/
 
   push:
     needs: validate
@@ -431,7 +466,7 @@ jobs:
 
 Use separate KV buckets or NATS clusters per environment:
 
-- **Separate buckets**: Push to `rules-staging` and `rules-production` buckets in the same cluster. Configure shunt with `rules.kvBucket` (or `SHUNT_RULES_KVBUCKET`) per environment.
+- **Separate buckets**: Push to `rules-staging` and `rules-production` buckets in the same cluster. Configure shunt with `rules.kvBucket` in the config file per environment.
 - **Separate clusters**: Push to entirely different NATS clusters per environment using `--nats-url` targeting each cluster.
 
 ```bash

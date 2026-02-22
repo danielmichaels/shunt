@@ -390,6 +390,7 @@ func (p *Processor) processNATSAction(action *NATSAction, context *EvaluationCon
 
 	result := &NATSAction{
 		Passthrough: action.Passthrough,
+		Mode:        action.Mode,
 	}
 
 	subject, err := p.templater.Execute(action.Subject, context)
@@ -486,6 +487,7 @@ func (p *Processor) processNATSActionWithForEach(action *NATSAction, context *Ev
 		// Template the action (reusing the same context)
 		actionResult := &NATSAction{
 			Passthrough: action.Passthrough,
+			Mode:        action.Mode,
 		}
 
 		subject, err := p.templater.Execute(action.Subject, elementContext)

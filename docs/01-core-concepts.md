@@ -207,6 +207,7 @@ An action defines the work to be done when a rule's conditions are met.
 action:
   nats:
     subject: "alerts.high_temp.{device_id}"
+    mode: core              # optional: "core" or "jetstream" (overrides global nats.publish.mode)
     payload: |
       {
         "alert": "High temperature detected!",
@@ -215,6 +216,8 @@ action:
         "timestamp": "{@timestamp()}"
       }
 ```
+
+The optional `mode` field overrides the global `nats.publish.mode` for this action only. Use `core` for fire-and-forget (notifications, dashboards) or `jetstream` for durable delivery (audit logs, safety alerts). When omitted, the global setting applies. See [Per-Rule Publish Mode Override](./07-configuration.md#per-rule-publish-mode-override) for examples.
 
 **HTTP Action**: Makes an outbound HTTP request to an external service.
 ```yaml

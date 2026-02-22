@@ -427,6 +427,10 @@ func (l *RulesLoader) validateNATSAction(action *NATSAction) error {
 		return fmt.Errorf("NATS action subject cannot be empty")
 	}
 
+	if action.Mode != "" && action.Mode != "core" && action.Mode != "jetstream" {
+		return fmt.Errorf("NATS action mode must be 'jetstream' or 'core', got: %s", action.Mode)
+	}
+
 	if action.Passthrough && action.Payload != "" {
 		return fmt.Errorf("cannot specify both 'payload' and 'passthrough: true' - choose one")
 	}
