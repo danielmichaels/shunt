@@ -18,4 +18,4 @@ COPY --from=builder /shunt /shunt
 
 EXPOSE 2112 8080
 
-ENTRYPOINT ["/shunt", "serve"]
+ENTRYPOINT ["/shunt"]
