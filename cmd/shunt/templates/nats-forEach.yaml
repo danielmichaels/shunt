@@ -7,7 +7,8 @@
 # Example Use Case: Processing a batch of security events and creating an
 # individual alert for each critical event.
 #
-- trigger:
+- # (Optional) name: my-rule-name — shown as "rule_name" label in Prometheus metrics
+  trigger:
     nats:
       subject: "security.events.batch"
   action:

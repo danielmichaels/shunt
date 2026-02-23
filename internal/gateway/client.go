@@ -392,15 +392,14 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg) 
 					"url", action.HTTP.URL,
 					"error", err)
 				if c.metrics != nil {
-					c.metrics.IncActionsTotal("error")
+					c.metrics.IncActionsTotal("error", action.RuleName)
 				}
 				// Return error to NAK message
 				return fmt.Errorf("HTTP action failed: %w", err)
 			}
 
 			if c.metrics != nil {
-				c.metrics.IncActionsTotal("success")
-				c.metrics.IncRuleMatches()
+				c.metrics.IncActionsTotal("success", action.RuleName)
 			}
 		} else if action.NATS != nil {
 			// NATS actions not typical in outbound, but log if present

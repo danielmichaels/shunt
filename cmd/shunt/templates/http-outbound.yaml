@@ -5,7 +5,8 @@
 #
 # Example Use Case: Sending a critical alert from NATS to PagerDuty.
 #
-- trigger:
+- # (Optional) name: my-rule-name — shown as "rule_name" label in Prometheus metrics
+  trigger:
     nats:
       subject: "alerts.critical.>"
   action:

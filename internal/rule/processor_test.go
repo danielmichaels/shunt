@@ -1819,3 +1819,113 @@ func TestProcessor_NATSAction_ModeCarryThrough(t *testing.T) {
 		}
 	})
 }
+
+func TestRule_RuleName(t *testing.T) {
+	tests := []struct {
+		name string
+		rule Rule
+		want string
+	}{
+		{
+			name: "explicit name",
+			rule: Rule{
+				Name:    "bedroom-temp-alert",
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.data"}},
+			},
+			want: "bedroom-temp-alert",
+		},
+		{
+			name: "fallback to NATS subject",
+			rule: Rule{
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.temperature.>"}},
+			},
+			want: "sensors.temperature.>",
+		},
+		{
+			name: "fallback to HTTP path",
+			rule: Rule{
+				Trigger: Trigger{HTTP: &HTTPTrigger{Path: "/webhooks/github"}},
+			},
+			want: "/webhooks/github",
+		},
+		{
+			name: "fallback to unknown",
+			rule: Rule{},
+			want: "unknown",
+		},
+		{
+			name: "explicit name takes precedence over trigger",
+			rule: Rule{
+				Name:    "my-rule",
+				Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.data"}},
+			},
+			want: "my-rule",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.rule.RuleName()
+			if got != tt.want {
+				t.Errorf("RuleName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessor_ActionRuleNameStamped(t *testing.T) {
+	processor := newTestProcessor()
+
+	rules := []Rule{
+		{
+			Name:    "temp-alert",
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.temp"}},
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "alerts.temp",
+					Payload: `{"ok": true}`,
+				},
+			},
+		},
+	}
+	processor.LoadRules(rules)
+
+	actions, err := processor.ProcessNATS("sensors.temp", []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("ProcessNATS failed: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("Expected 1 action, got %d", len(actions))
+	}
+	if actions[0].RuleName != "temp-alert" {
+		t.Errorf("action.RuleName = %q, want %q", actions[0].RuleName, "temp-alert")
+	}
+}
+
+func TestProcessor_ActionRuleNameFallbackToSubject(t *testing.T) {
+	processor := newTestProcessor()
+
+	rules := []Rule{
+		{
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "sensors.temp"}},
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "alerts.temp",
+					Payload: `{"ok": true}`,
+				},
+			},
+		},
+	}
+	processor.LoadRules(rules)
+
+	actions, err := processor.ProcessNATS("sensors.temp", []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("ProcessNATS failed: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("Expected 1 action, got %d", len(actions))
+	}
+	if actions[0].RuleName != "sensors.temp" {
+		t.Errorf("action.RuleName = %q, want %q", actions[0].RuleName, "sensors.temp")
+	}
+}

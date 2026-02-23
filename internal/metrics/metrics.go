@@ -16,11 +16,11 @@ type Metrics struct {
 	// Message processing metrics (shared)
 	messagesTotal            *prometheus.CounterVec
 	messageProcessingBacklog prometheus.Gauge
-	ruleMatches              prometheus.Counter
+	ruleMatches              *prometheus.CounterVec
 	rulesActive              prometheus.Gauge
 	actionsTotal             *prometheus.CounterVec
 	actionsByType            *prometheus.CounterVec
-	actionPublishFailures    prometheus.Counter
+	actionPublishFailures    *prometheus.CounterVec
 	templateOpsTotal         *prometheus.CounterVec
 
 	// NATS connection metrics (shared)
@@ -44,7 +44,7 @@ type Metrics struct {
 	forEachDuration         *prometheus.HistogramVec
 
 	// Debounce metrics (shared)
-	messagesDebounced prometheus.Counter
+	messagesDebounced *prometheus.CounterVec
 
 	// Array operator metrics (shared)
 	arrayOperatorEvaluations *prometheus.CounterVec
@@ -87,11 +87,12 @@ func NewMetrics(registry *prometheus.Registry) (*Metrics, error) {
 				Help: "Number of messages waiting to be processed",
 			},
 		),
-		ruleMatches: prometheus.NewCounter(
+		ruleMatches: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "rule_matches_total",
 				Help: "Total number of rule matches",
 			},
+			[]string{"rule_name"},
 		),
 		rulesActive: prometheus.NewGauge(
 			prometheus.GaugeOpts{
@@ -104,20 +105,21 @@ func NewMetrics(registry *prometheus.Registry) (*Metrics, error) {
 				Name: "actions_total",
 				Help: "Total number of actions by status",
 			},
-			[]string{"status"},
+			[]string{"status", "rule_name"},
 		),
 		actionsByType: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "actions_by_type_total",
 				Help: "Total number of actions by type",
 			},
-			[]string{"type"},
+			[]string{"type", "rule_name"},
 		),
-		actionPublishFailures: prometheus.NewCounter(
+		actionPublishFailures: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "action_publish_failures_total",
 				Help: "Total number of action publish failures",
 			},
+			[]string{"rule_name"},
 		),
 		templateOpsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -216,11 +218,12 @@ func NewMetrics(registry *prometheus.Registry) (*Metrics, error) {
 		),
 
 		// Debounce metrics
-		messagesDebounced: prometheus.NewCounter(
+		messagesDebounced: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "messages_debounced_total",
 				Help: "Total number of messages suppressed by per-rule debounce",
 			},
+			[]string{"rule_name"},
 		),
 
 		// Array operator metrics
@@ -341,24 +344,24 @@ func (m *Metrics) SetMessageProcessingBacklog(count float64) {
 	m.messageProcessingBacklog.Set(count)
 }
 
-func (m *Metrics) IncRuleMatches() {
-	m.ruleMatches.Inc()
+func (m *Metrics) IncRuleMatches(ruleName string) {
+	m.ruleMatches.WithLabelValues(ruleName).Inc()
 }
 
 func (m *Metrics) SetRulesActive(count float64) {
 	m.rulesActive.Set(count)
 }
 
-func (m *Metrics) IncActionsTotal(status string) {
-	m.actionsTotal.WithLabelValues(status).Inc()
+func (m *Metrics) IncActionsTotal(status, ruleName string) {
+	m.actionsTotal.WithLabelValues(status, ruleName).Inc()
 }
 
-func (m *Metrics) IncActionsByType(actionType string) {
-	m.actionsByType.WithLabelValues(actionType).Inc()
+func (m *Metrics) IncActionsByType(actionType, ruleName string) {
+	m.actionsByType.WithLabelValues(actionType, ruleName).Inc()
 }
 
-func (m *Metrics) IncActionPublishFailures() {
-	m.actionPublishFailures.Inc()
+func (m *Metrics) IncActionPublishFailures(ruleName string) {
+	m.actionPublishFailures.WithLabelValues(ruleName).Inc()
 }
 
 func (m *Metrics) IncTemplateOpsTotal(status string) {
@@ -422,8 +425,8 @@ func (m *Metrics) ObserveForEachDuration(ruleFile string, seconds float64) {
 }
 
 // Debounce metrics
-func (m *Metrics) IncMessagesDebounced() {
-	m.messagesDebounced.Inc()
+func (m *Metrics) IncMessagesDebounced(ruleName string) {
+	m.messagesDebounced.WithLabelValues(ruleName).Inc()
 }
 
 // Array operator metrics

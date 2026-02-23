@@ -27,6 +27,12 @@ func (rb *RuleBuilder) BuildRule() ([]byte, error) {
 
 	fmt.Printf("\n%s--- Building a New Rule ---%s\n", ColorGreen, ColorReset)
 
+	// 0. Get optional rule name
+	name, _ := rb.prompter.AskWithDefault("Rule name (optional, press Enter to skip):", "")
+	if name != "" {
+		r.Name = name
+	}
+
 	// 1. Get Trigger
 	trigger, err := rb.getTrigger()
 	if err != nil {

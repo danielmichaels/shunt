@@ -344,7 +344,7 @@ func (s *InboundServer) processWebhook(path, method string, body []byte, headers
 					"subject", action.NATS.Subject,
 					"error", err)
 				if s.metrics != nil {
-					s.metrics.IncActionsTotal("error")
+					s.metrics.IncActionsTotal("error", action.RuleName)
 				}
 			} else {
 				s.logger.Debug("published to NATS",
@@ -352,7 +352,7 @@ func (s *InboundServer) processWebhook(path, method string, body []byte, headers
 					"method", method,
 					"subject", action.NATS.Subject)
 				if s.metrics != nil {
-					s.metrics.IncActionsTotal("success")
+					s.metrics.IncActionsTotal("success", action.RuleName)
 				}
 			}
 		} else if action.HTTP != nil {

@@ -5,7 +5,8 @@
 #
 # Example Use Case: Adding customer metadata (like name or tier) to an order event.
 #
-- trigger:
+- # (Optional) name: my-rule-name — shown as "rule_name" label in Prometheus metrics
+  trigger:
     nats:
       subject: "orders.new"
   conditions:

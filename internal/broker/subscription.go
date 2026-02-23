@@ -426,19 +426,18 @@ func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream
 	for _, action := range actions {
 		// Check for NATS action
 		if action.NATS != nil {
-			if err := sm.publishActionWithRetry(ctx, action.NATS); err != nil {
+			if err := sm.publishActionWithRetry(ctx, action.NATS, action.RuleName); err != nil {
 				sm.logger.Error("failed to publish NATS action after retries",
 					"actionSubject", action.NATS.Subject,
 					"error", err)
 				if sm.metrics != nil {
-					sm.metrics.IncActionsTotal("error")
+					sm.metrics.IncActionsTotal("error", action.RuleName)
 				}
 				// Return the error to allow the message to be NAK'd, as the action failed.
 				return fmt.Errorf("failed to publish NATS action: %w", err)
 			}
 			if sm.metrics != nil {
-				sm.metrics.IncActionsTotal("success")
-				sm.metrics.IncRuleMatches()
+				sm.metrics.IncActionsTotal("success", action.RuleName)
 			}
 		} else if action.HTTP != nil {
 			// HTTP actions will be handled by http-gateway
@@ -457,7 +456,7 @@ func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream
 }
 
 // publishActionWithRetry publishes a NATS action with exponential backoff and jitter.
-func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, action *rule.NATSAction) error {
+func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, action *rule.NATSAction, ruleName string) error {
 	maxRetries := sm.publishCfg.MaxRetries
 	baseDelay := sm.publishCfg.RetryBaseDelay
 	publishMode := sm.publishCfg.Mode
@@ -494,7 +493,7 @@ func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, actio
 		sm.logger.Warn("action publish failed, will retry",
 			"attempt", attempt+1, "maxRetries", maxRetries, "subject", action.Subject, "error", err)
 		if sm.metrics != nil {
-			sm.metrics.IncActionPublishFailures()
+			sm.metrics.IncActionPublishFailures(ruleName)
 		}
 
 		if attempt == maxRetries-1 {

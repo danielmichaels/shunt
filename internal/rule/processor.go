@@ -315,14 +315,15 @@ func (p *Processor) evaluateRules(rules []*Rule, context *EvaluationContext, tri
 	var actions []*Action
 
 	for _, rule := range rules {
-		p.logger.Debug("evaluating rule", "triggerType", triggerType)
+		ruleName := rule.RuleName()
+		p.logger.Debug("evaluating rule", "triggerType", triggerType, "ruleName", ruleName)
 
 		if rule.DebounceDuration > 0 {
 			key := p.debounceKeyForRule(rule)
 			if !p.debouncer.ShouldFire(key, rule.DebounceDuration) {
 				p.logger.Debug("rule debounced", "key", key, "duration", rule.DebounceDuration)
 				if p.metrics != nil {
-					p.metrics.IncMessagesDebounced()
+					p.metrics.IncMessagesDebounced(ruleName)
 				}
 				continue
 			}
@@ -339,21 +340,23 @@ func (p *Processor) evaluateRules(rules []*Rule, context *EvaluationContext, tri
 			}
 
 			for _, action := range actionResults {
+				action.RuleName = ruleName
+
 				if p.metrics != nil {
 					p.metrics.IncTemplateOpsTotal("success")
-					p.metrics.IncRuleMatches()
+					p.metrics.IncRuleMatches(ruleName)
 
 					if action.NATS != nil {
 						if action.NATS.Passthrough {
-							p.metrics.IncActionsByType("passthrough")
+							p.metrics.IncActionsByType("passthrough", ruleName)
 						} else {
-							p.metrics.IncActionsByType("templated")
+							p.metrics.IncActionsByType("templated", ruleName)
 						}
 					} else if action.HTTP != nil {
 						if action.HTTP.Passthrough {
-							p.metrics.IncActionsByType("passthrough")
+							p.metrics.IncActionsByType("passthrough", ruleName)
 						} else {
-							p.metrics.IncActionsByType("templated")
+							p.metrics.IncActionsByType("templated", ruleName)
 						}
 					}
 				}
