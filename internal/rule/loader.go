@@ -341,6 +341,17 @@ func (l *RulesLoader) validateRule(rule *Rule, filePath string, ruleIndex int) e
 		}
 	}
 
+	if rule.Debounce != "" {
+		d, err := time.ParseDuration(rule.Debounce)
+		if err != nil {
+			return fmt.Errorf("invalid debounce duration %q: %w", rule.Debounce, err)
+		}
+		if d <= 0 {
+			return fmt.Errorf("debounce duration must be positive, got: %s", rule.Debounce)
+		}
+		rule.DebounceDuration = d
+	}
+
 	return nil
 }
 

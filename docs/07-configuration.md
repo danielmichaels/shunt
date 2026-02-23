@@ -186,6 +186,14 @@ A homelab where most rules are simple forwarding (`nats.publish.mode: core` glob
 |---|---|---|---|
 | `rules.kvBucket` | `string` | `rules` | KV bucket for rule definitions |
 
+### Per-Rule Fields
+
+These fields are set on individual rules in rule YAML files, not in the server config.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `debounce` | `duration string` | *(disabled)* | Suppress rapid re-fires within a time window (e.g., `"30s"`, `"5m"`). See [Debounce](./01-core-concepts.md#4-debounce). |
+
 ## Security
 
 | Config Key | Type | Default | Description |

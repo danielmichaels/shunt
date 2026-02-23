@@ -1659,6 +1659,76 @@ func TestReplaceRules_AtomicSwap(t *testing.T) {
 	}
 }
 
+func TestProcessor_DebounceSkipsRapidRefires(t *testing.T) {
+	processor := newTestProcessor()
+
+	rules := []Rule{
+		{
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "zigbee2mqtt.DoorSensor"}},
+			Debounce:         "30s",
+			DebounceDuration: 30 * time.Second,
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "lab.notifications.garage-back-door",
+					Payload: `{"contact": {contact}}`,
+				},
+			},
+		},
+	}
+	processor.LoadRules(rules)
+
+	payload := []byte(`{"contact": true}`)
+
+	// First message fires
+	actions, err := processor.ProcessNATS("zigbee2mqtt.DoorSensor", payload, nil)
+	if err != nil {
+		t.Fatalf("first ProcessNATS failed: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action on first fire, got %d", len(actions))
+	}
+
+	// Rapid re-fires should be suppressed
+	for i := 0; i < 25; i++ {
+		actions, err = processor.ProcessNATS("zigbee2mqtt.DoorSensor", payload, nil)
+		if err != nil {
+			t.Fatalf("ProcessNATS iteration %d failed: %v", i, err)
+		}
+		if len(actions) != 0 {
+			t.Fatalf("expected 0 actions on debounced fire %d, got %d", i, len(actions))
+		}
+	}
+}
+
+func TestProcessor_NoDebounceFiresEveryTime(t *testing.T) {
+	processor := newTestProcessor()
+
+	rules := []Rule{
+		{
+			Trigger: Trigger{NATS: &NATSTrigger{Subject: "energy.reading"}},
+			Action: Action{
+				NATS: &NATSAction{
+					Subject: "energy.processed",
+					Payload: `{"watts": {watts}}`,
+				},
+			},
+		},
+	}
+	processor.LoadRules(rules)
+
+	payload := []byte(`{"watts": 1500}`)
+
+	for i := 0; i < 10; i++ {
+		actions, err := processor.ProcessNATS("energy.reading", payload, nil)
+		if err != nil {
+			t.Fatalf("ProcessNATS iteration %d failed: %v", i, err)
+		}
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action on iteration %d (no debounce), got %d", i, len(actions))
+		}
+	}
+}
+
 func TestProcessor_NATSAction_ModeCarryThrough(t *testing.T) {
 	processor := newTestProcessor()
 

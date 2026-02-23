@@ -13,6 +13,7 @@ Rules are stored in NATS KV and hot-reloaded via KV Watch — no restarts requir
 *   **HTTP Gateway** (optional subsystem): Bidirectional HTTP-to-NATS bridge with inbound webhook ingestion and outbound API calls.
 *   **Auth Manager** (optional subsystem): OAuth2 and custom-HTTP token management, stored in NATS KV.
 *   **NATS JetStream Native**: Pull consumers for durable, scalable message processing. Per-rule publish mode override (`core` or `jetstream`) for mixed delivery guarantees.
+*   **Debounce**: Per-rule suppression of rapid re-fires within a configurable time window.
 *   **Rule Engine**: Dynamic conditions, payload/header/subject templating, KV data enrichment with local cache, time-based logic.
 *   **Cryptographic Security**: NKey signature verification for message integrity.
 *   **Production Ready**: Structured logging, Prometheus metrics, graceful shutdown, full NATS auth support.
@@ -145,6 +146,7 @@ Key metrics:
 |---|---|
 | `messages_total` | Messages processed by status |
 | `rule_matches_total` | Rule match count |
+| `messages_debounced_total` | Messages suppressed by per-rule debounce |
 | `actions_total` | Actions executed by status |
 | `action_publish_failures_total` | NATS publish failures |
 | `nats_connection_status` | 1 = connected, 0 = disconnected |
