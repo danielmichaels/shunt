@@ -71,5 +71,5 @@ release:
   github:
     owner: danielmichaels
     name: shunt
-  draft: false
+  draft: true
   prerelease: auto

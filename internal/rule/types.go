@@ -5,13 +5,16 @@ package rule
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Rule represents a generic rule with trigger and action
 type Rule struct {
-	Trigger    Trigger     `json:"trigger" yaml:"trigger"`
-	Conditions *Conditions `json:"conditions,omitempty" yaml:"conditions,omitempty"`
-	Action     Action      `json:"action" yaml:"action"`
+	Trigger          Trigger       `json:"trigger" yaml:"trigger"`
+	Conditions       *Conditions   `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+	Action           Action        `json:"action" yaml:"action"`
+	Debounce         string        `json:"debounce,omitempty" yaml:"debounce,omitempty"`
+	DebounceDuration time.Duration `json:"-" yaml:"-"`
 }
 
 // Trigger defines what initiates rule evaluation (NATS or HTTP)

@@ -233,6 +233,77 @@ action:
       initialDelay: "1s"
 ```
 
+## 4. Debounce
+
+Debounce suppresses rapid re-fires of a rule within a configurable time window. When a rule has a `debounce` field, only the first matching message fires the action — subsequent matches within the window are silently dropped.
+
+```yaml
+- trigger:
+    nats:
+      subject: "sensors.temperature.>"
+  debounce: "30s"
+  conditions:
+    operator: and
+    items:
+      - field: "{temperature}"
+        operator: gt
+        value: 45
+  action:
+    nats:
+      subject: "alerts.high_temp"
+      payload: '{"temp": {temperature}, "device": "{device_id}"}'
+```
+
+The `debounce` field accepts a Go duration string at the rule level (alongside `trigger`, `conditions`, and `action`).
+
+### How It Works
+
+1. A message matches the rule's trigger (and optionally passes conditions).
+2. Shunt builds a debounce key from the trigger and action subjects: `trigger_subject::action_subject`.
+3. If this key has not fired within the debounce window, the action executes and the timestamp is recorded.
+4. If the key *has* fired within the window, the message is dropped and the `messages_debounced_total` metric increments.
+
+Debounce state is **in-memory only** — it resets on process restart. The first message after a restart always fires.
+
+### Valid Duration Formats
+
+Any Go `time.Duration` string: `"5s"`, `"1m"`, `"1m30s"`, `"2h"`, `"500ms"`.
+
+### Examples
+
+**Sensor flood protection** — only alert once per minute regardless of how many readings arrive:
+
+```yaml
+- trigger:
+    nats:
+      subject: "sensors.temperature.>"
+  debounce: "1m"
+  conditions:
+    operator: and
+    items:
+      - field: "{temperature}"
+        operator: gt
+        value: 45
+  action:
+    nats:
+      subject: "alerts.high_temp.{device_id}"
+      payload: '{"temp": {temperature}, "device": "{device_id}"}'
+```
+
+**Notification deduplication** — suppress duplicate webhook deliveries for 5 minutes:
+
+```yaml
+- trigger:
+    nats:
+      subject: "events.deploy.>"
+  debounce: "5m"
+  action:
+    http:
+      url: "https://hooks.slack.com/services/T00/B00/xxx"
+      method: "POST"
+      payload: '{"text": "Deploy event on {service}"}'
+```
+
 ## Environment Variables
 
 The rule engine supports environment variable expansion for static configuration values using `${VAR_NAME}` syntax. This enables secure secret management and environment-specific configuration without hardcoding values in rule files.

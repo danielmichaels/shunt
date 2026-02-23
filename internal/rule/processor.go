@@ -33,6 +33,7 @@ type Processor struct {
 	evaluator       *Evaluator
 	templater       *TemplateEngine
 	sigVerification *SignatureVerification
+	debouncer       *Debouncer
 	maxForEachIters int // Configurable forEach iteration limit
 }
 
@@ -124,6 +125,7 @@ func NewProcessor(log *slog.Logger, metrics *metrics.Metrics, kvCtx *KVContext, 
 		evaluator:       NewEvaluator(log),
 		templater:       NewTemplateEngine(log),
 		sigVerification: sigVerification,
+		debouncer:       NewDebouncer(),
 		maxForEachIters: DefaultMaxForEachIterations,
 	}
 
@@ -314,6 +316,17 @@ func (p *Processor) evaluateRules(rules []*Rule, context *EvaluationContext, tri
 
 	for _, rule := range rules {
 		p.logger.Debug("evaluating rule", "triggerType", triggerType)
+
+		if rule.DebounceDuration > 0 {
+			key := p.debounceKeyForRule(rule)
+			if !p.debouncer.ShouldFire(key, rule.DebounceDuration) {
+				p.logger.Debug("rule debounced", "key", key, "duration", rule.DebounceDuration)
+				if p.metrics != nil {
+					p.metrics.IncMessagesDebounced()
+				}
+				continue
+			}
+		}
 
 		if rule.Conditions == nil || p.evaluator.Evaluate(rule.Conditions, context) {
 			actionResults, err := p.processAction(&rule.Action, context)
@@ -905,6 +918,21 @@ func (p *Processor) ProcessForSubscription(triggerSubject, messageSubject string
 // Used by internal/broker/subscription.go.
 func (p *Processor) ProcessWithSubject(subject string, payload []byte, headers map[string]string) ([]*Action, error) {
 	return p.ProcessNATS(subject, payload, headers)
+}
+
+func (p *Processor) debounceKeyForRule(rule *Rule) string {
+	var trigger, action string
+	if rule.Trigger.NATS != nil {
+		trigger = rule.Trigger.NATS.Subject
+	} else if rule.Trigger.HTTP != nil {
+		trigger = rule.Trigger.HTTP.Path
+	}
+	if rule.Action.NATS != nil {
+		action = rule.Action.NATS.Subject
+	} else if rule.Action.HTTP != nil {
+		action = rule.Action.HTTP.URL
+	}
+	return DebounceKey(trigger, action)
 }
 
 // SetTimeProvider allows injecting a mock time provider for testing
