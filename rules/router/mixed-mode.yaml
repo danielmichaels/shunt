@@ -1,8 +1,12 @@
 # Mixed publish mode: one trigger, two delivery guarantees.
 # Message: {"door_id": "front", "event": "opened", "user": "alice"}
+#
+# When multiple rules share the same trigger, "name" lets you distinguish them
+# in Prometheus metrics. Without it, both rules would show the same rule_name label.
 
 # Durable audit log — must not be lost
-- trigger:
+- name: door-audit-log
+  trigger:
     nats:
       subject: access.door.>
   action:
@@ -12,7 +16,8 @@
       payload: '{"door": "{door_id}", "action": "{event}", "user": "{user}", "time": "{@timestamp()}"}'
 
 # Live dashboard — ephemeral, no stream needed
-- trigger:
+- name: door-dashboard-update
+  trigger:
     nats:
       subject: access.door.>
   action:

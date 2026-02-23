@@ -518,8 +518,7 @@ func (b *NATSBroker) initializeNATSConnection() error {
 		jetstream.WithPublishAsyncErrHandler(func(js jetstream.JetStream, msg *nats.Msg, err error) {
 			b.logger.Error("asynchronous publish failed", "subject", msg.Subject, "error", err)
 			if b.metrics != nil {
-				// This metric tracks failures that happen after the initial send.
-				b.metrics.IncActionPublishFailures()
+				b.metrics.IncActionPublishFailures("unknown")
 			}
 		}),
 	}

@@ -6,7 +6,8 @@
 #
 # Example Use Case: A command to unlock a door, which must be authenticated.
 #
-- trigger:
+- # (Optional) name: my-rule-name — shown as "rule_name" label in Prometheus metrics
+  trigger:
     nats:
       subject: "commands.secure.door.unlock"
   conditions:

@@ -326,14 +326,20 @@ metadata:
 
 Key metrics to alert on:
 
-| Metric | Type | Description |
-|---|---|---|
-| `messages_total{status="error"}` | Counter | Failed message processing |
-| `action_publish_failures_total` | Counter | NATS publish failures |
-| `nats_connection_status` | Gauge | 1 = connected, 0 = disconnected |
-| `nats_reconnects_total` | Counter | NATS reconnection events |
-| `rules_active` | Gauge | Number of loaded rules |
-| `message_processing_backlog` | Gauge | Messages waiting to be processed |
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `rule_matches_total` | Counter | `rule_name` | Rules matched per rule |
+| `actions_total` | Counter | `status`, `rule_name` | Actions executed (success/error) per rule |
+| `actions_by_type_total` | Counter | `type`, `rule_name` | Actions by type (nats/http) per rule |
+| `action_publish_failures_total` | Counter | `rule_name` | NATS publish failures per rule |
+| `messages_debounced_total` | Counter | `rule_name` | Debounced messages per rule |
+| `messages_total{status="error"}` | Counter | `status` | Failed message processing |
+| `nats_connection_status` | Gauge | | 1 = connected, 0 = disconnected |
+| `nats_reconnects_total` | Counter | | NATS reconnection events |
+| `rules_active` | Gauge | | Number of loaded rules |
+| `message_processing_backlog` | Gauge | | Messages waiting to be processed |
+
+The `rule_name` label is derived from the rule's optional `name` field. When omitted, the trigger subject (NATS) or path (HTTP) is used instead. Set explicit names when multiple rules share the same trigger to distinguish them in dashboards.
 
 ## Init Container Pattern
 

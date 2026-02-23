@@ -6,7 +6,8 @@
 # Example Use Case: Processing a Stripe event webhook that contains multiple
 # charge events in a single request.
 #
-- trigger:
+- # (Optional) name: my-rule-name — shown as "rule_name" label in Prometheus metrics
+  trigger:
     http:
       path: "/webhooks/stripe/batch"
       method: "POST"

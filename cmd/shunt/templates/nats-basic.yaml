@@ -6,7 +6,10 @@
 #
 # Example Use Case: Alerting when a sensor reading exceeds a threshold.
 #
-- trigger:
+- # (Optional) A human-readable name for this rule. Appears as the "rule_name"
+  # label on Prometheus metrics. If omitted, the trigger subject is used instead.
+  name: high-temp-alert
+  trigger:
     nats:
       # The subject to listen on. Supports wildcards (*, >).
       subject: "sensors.temperature.>"

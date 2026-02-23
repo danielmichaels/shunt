@@ -10,11 +10,27 @@ import (
 
 // Rule represents a generic rule with trigger and action
 type Rule struct {
+	Name             string        `json:"name,omitempty" yaml:"name,omitempty"`
 	Trigger          Trigger       `json:"trigger" yaml:"trigger"`
 	Conditions       *Conditions   `json:"conditions,omitempty" yaml:"conditions,omitempty"`
 	Action           Action        `json:"action" yaml:"action"`
 	Debounce         string        `json:"debounce,omitempty" yaml:"debounce,omitempty"`
 	DebounceDuration time.Duration `json:"-" yaml:"-"`
+}
+
+// RuleName returns a human-readable identifier for the rule.
+// Prefers explicit Name, falls back to trigger subject (NATS) or path (HTTP), then "unknown".
+func (r *Rule) RuleName() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	if r.Trigger.NATS != nil && r.Trigger.NATS.Subject != "" {
+		return r.Trigger.NATS.Subject
+	}
+	if r.Trigger.HTTP != nil && r.Trigger.HTTP.Path != "" {
+		return r.Trigger.HTTP.Path
+	}
+	return "unknown"
 }
 
 // Trigger defines what initiates rule evaluation (NATS or HTTP)
@@ -36,8 +52,9 @@ type HTTPTrigger struct {
 
 // Action defines what happens when rule matches (NATS or HTTP)
 type Action struct {
-	NATS *NATSAction `json:"nats,omitempty" yaml:"nats,omitempty"`
-	HTTP *HTTPAction `json:"http,omitempty" yaml:"http,omitempty"`
+	NATS     *NATSAction `json:"nats,omitempty" yaml:"nats,omitempty"`
+	HTTP     *HTTPAction `json:"http,omitempty" yaml:"http,omitempty"`
+	RuleName string      `json:"-" yaml:"-"`
 }
 
 // NATSAction represents publishing to a NATS subject

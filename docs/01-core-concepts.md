@@ -3,14 +3,17 @@
 All applications in this repository are configured using a shared rule syntax. A **rule** is a YAML object composed of a `trigger`, optional `conditions`, and an `action`.
 
 ```yaml
-# A rule is defined by a trigger, optional conditions, and an action.
-- trigger:
+# A rule is defined by an optional name, a trigger, optional conditions, and an action.
+- name: my-rule        # optional — used as the "rule_name" label in Prometheus metrics
+  trigger:
     # ... defines what starts the rule evaluation (e.g., a NATS message or an HTTP request)
   conditions:
     # ... defines the logic to determine if the action should run (e.g., field value checks)
   action:
     # ... defines what to do if the conditions pass (e.g., publish a NATS message or make an HTTP call)
 ```
+
+When `name` is omitted the trigger subject (NATS) or path (HTTP) is used as the metric label instead.
 
 ## 1. Triggers (The "If")
 
