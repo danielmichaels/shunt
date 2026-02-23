@@ -506,6 +506,10 @@ func (b *NATSBroker) initializeNATSConnection() error {
 		"connectedURL", connectedURL,
 		"availableURLs", len(b.config.NATS.URLs))
 
+	if b.metrics != nil {
+		b.metrics.SetNATSConnectionStatus(true)
+	}
+
 	// Configure JetStream for Async Publishing ---
 	jsOpts := []jetstream.JetStreamOpt{
 		// Set a limit on the number of outstanding async publishes. This is crucial for backpressure.
