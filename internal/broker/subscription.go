@@ -12,12 +12,14 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
+	"github.com/danielmichaels/shunt/internal/trace"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	"log/slog"
 )
 
 // Timeout and retry constants for subscription operations
@@ -330,10 +332,12 @@ func (sm *SubscriptionManager) messageWorker(ctx context.Context, sub *Subscript
 // processMessageWithRecovery wraps message processing with panic recovery and error handling.
 // This ensures a single malformed message cannot crash the entire worker.
 func (sm *SubscriptionManager) processMessageWithRecovery(ctx context.Context, msg jetstream.Msg, subject string, workerID int) {
-	// Defer panic recovery to catch any panics during message processing
+	traceID := trace.FromNATSHeaders(msg.Headers())
+
 	defer func() {
 		if r := recover(); r != nil {
 			sm.logger.Error("panic recovered in message worker",
+				trace.LogKey, traceID,
 				"panic", r,
 				"subject", subject,
 				"workerID", workerID,
@@ -342,6 +346,7 @@ func (sm *SubscriptionManager) processMessageWithRecovery(ctx context.Context, m
 			// Terminate poison message to prevent redelivery loop
 			if termErr := msg.Term(); termErr != nil {
 				sm.logger.Error("failed to terminate message after panic",
+					trace.LogKey, traceID,
 					"subject", subject,
 					"error", termErr)
 			}
@@ -353,7 +358,7 @@ func (sm *SubscriptionManager) processMessageWithRecovery(ctx context.Context, m
 	}()
 
 	// Process the message through the rule engine
-	if err := sm.processMessage(ctx, msg, subject); err != nil {
+	if err := sm.processMessage(ctx, msg, subject, traceID); err != nil {
 		sm.logger.Error("failed to process message",
 			"subject", subject,
 			"workerID", workerID,
@@ -397,13 +402,15 @@ func (sm *SubscriptionManager) processMessageWithRecovery(ctx context.Context, m
 // processMessage handles a single message through the rule engine.
 // triggerSubject is the trigger pattern this consumer is bound to (e.g., "sensors.tank.>"),
 // used for O(1) KV rule lookup via ProcessForSubscription.
-func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream.Msg, triggerSubject string) error {
+func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream.Msg, triggerSubject string, traceID string) error {
 	start := time.Now()
+	log := sm.logger.With(trace.LogKey, traceID)
+
 	if sm.metrics != nil {
 		sm.metrics.IncMessagesTotal("received")
 	}
 
-	sm.logger.Debug("processing message", "subject", msg.Subject(), "size", len(msg.Data()))
+	log.Info("processing message", "subject", msg.Subject(), "size", len(msg.Data()))
 
 	// Extract headers
 	headers := make(map[string]string)
@@ -418,45 +425,44 @@ func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream
 	// Process through rule engine (uses ProcessNATS internally via backward compatibility layer)
 	actions, err := sm.processor.ProcessForSubscription(triggerSubject, msg.Subject(), msg.Data(), headers)
 	if err != nil {
-		// This error will be caught by the caller (processMessageWithRecovery) and handled appropriately.
 		return fmt.Errorf("rule processing failed: %w", err)
 	}
 
 	// Publish all matched actions
 	for _, action := range actions {
-		// Check for NATS action
+		action.TraceID = traceID
+
 		if action.NATS != nil {
-			if err := sm.publishActionWithRetry(ctx, action.NATS, action.RuleName); err != nil {
-				sm.logger.Error("failed to publish NATS action after retries",
+			if err := sm.publishActionWithRetry(ctx, action.NATS, action.RuleName, traceID); err != nil {
+				log.Error("failed to publish NATS action after retries",
 					"actionSubject", action.NATS.Subject,
+					"rule_name", action.RuleName,
 					"error", err)
 				if sm.metrics != nil {
 					sm.metrics.IncActionsTotal("error", action.RuleName)
 				}
-				// Return the error to allow the message to be NAK'd, as the action failed.
 				return fmt.Errorf("failed to publish NATS action: %w", err)
 			}
 			if sm.metrics != nil {
 				sm.metrics.IncActionsTotal("success", action.RuleName)
 			}
 		} else if action.HTTP != nil {
-			// HTTP actions will be handled by http-gateway
-			sm.logger.Warn("HTTP action detected in shunt - HTTP actions not supported in this application",
+			log.Warn("HTTP action detected in shunt - HTTP actions not supported in this application",
 				"actionURL", action.HTTP.URL,
 				"hint", "Use http-gateway for HTTP actions")
 		} else {
-			sm.logger.Error("action has neither NATS nor HTTP configuration - this should never happen",
+			log.Error("action has neither NATS nor HTTP configuration - this should never happen",
 				"subject", msg.Subject())
 		}
 	}
 
 	duration := time.Since(start)
-	sm.logger.Debug("message processed", "subject", msg.Subject(), "duration", duration, "actionsPublished", len(actions))
+	log.Info("message processed", "subject", msg.Subject(), "duration", duration, "actionsPublished", len(actions))
 	return nil
 }
 
 // publishActionWithRetry publishes a NATS action with exponential backoff and jitter.
-func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, action *rule.NATSAction, ruleName string) error {
+func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, action *rule.NATSAction, ruleName string, traceID string) error {
 	maxRetries := sm.publishCfg.MaxRetries
 	baseDelay := sm.publishCfg.RetryBaseDelay
 	publishMode := sm.publishCfg.Mode
@@ -477,12 +483,12 @@ func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, actio
 		var err error
 		switch publishMode {
 		case "core":
-			err = sm.publishCore(ctx, action)
+			err = sm.publishCore(ctx, action, traceID)
 		case "jetstream":
-			err = sm.publishJetStream(ctx, action)
+			err = sm.publishJetStream(ctx, action, traceID)
 		default:
 			sm.logger.Warn("unknown publish mode, falling back to jetstream", "mode", publishMode)
-			err = sm.publishJetStream(ctx, action)
+			err = sm.publishJetStream(ctx, action, traceID)
 		}
 
 		if err == nil {
@@ -515,7 +521,7 @@ func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, actio
 }
 
 // publishJetStream publishes to JetStream using the async model for high throughput.
-func (sm *SubscriptionManager) publishJetStream(ctx context.Context, action *rule.NATSAction) error {
+func (sm *SubscriptionManager) publishJetStream(ctx context.Context, action *rule.NATSAction, traceID string) error {
 	// Prepare payload
 	var payloadBytes []byte
 	if action.Passthrough {
@@ -534,6 +540,13 @@ func (sm *SubscriptionManager) publishJetStream(ctx context.Context, action *rul
 		for key, value := range action.Headers {
 			msg.Header.Set(key, value)
 		}
+	}
+
+	if traceID != "" {
+		if msg.Header == nil {
+			msg.Header = make(nats.Header)
+		}
+		msg.Header.Set(trace.NATSHeader, traceID)
 	}
 
 	// Publish async
@@ -563,7 +576,7 @@ func (sm *SubscriptionManager) publishJetStream(ctx context.Context, action *rul
 }
 
 // publishCore publishes to core NATS (fire-and-forget, no ack).
-func (sm *SubscriptionManager) publishCore(ctx context.Context, action *rule.NATSAction) error {
+func (sm *SubscriptionManager) publishCore(ctx context.Context, action *rule.NATSAction, traceID string) error {
 	// Prepare payload
 	var payloadBytes []byte
 	if action.Passthrough {
@@ -572,20 +585,22 @@ func (sm *SubscriptionManager) publishCore(ctx context.Context, action *rule.NAT
 		payloadBytes = []byte(action.Payload)
 	}
 
-	// Fast path: if there are no headers, use the simple Publish method.
-	if len(action.Headers) == 0 {
+	// Fast path: no headers and no trace ID
+	if len(action.Headers) == 0 && traceID == "" {
 		if err := sm.natsConn.Publish(action.Subject, payloadBytes); err != nil {
 			return fmt.Errorf("core nats publish failed: %w", err)
 		}
 		return nil
 	}
 
-	// With headers, we must construct a full nats.Msg object.
 	msg := nats.NewMsg(action.Subject)
 	msg.Data = payloadBytes
 	msg.Header = make(nats.Header)
 	for key, value := range action.Headers {
 		msg.Header.Set(key, value)
+	}
+	if traceID != "" {
+		msg.Header.Set(trace.NATSHeader, traceID)
 	}
 
 	if err := sm.natsConn.PublishMsg(msg); err != nil {

@@ -55,6 +55,7 @@ type Action struct {
 	NATS     *NATSAction `json:"nats,omitempty" yaml:"nats,omitempty"`
 	HTTP     *HTTPAction `json:"http,omitempty" yaml:"http,omitempty"`
 	RuleName string      `json:"-" yaml:"-"`
+	TraceID  string      `json:"-" yaml:"-"`
 }
 
 // NATSAction represents publishing to a NATS subject
