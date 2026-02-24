@@ -21,6 +21,7 @@ import (
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
+	"github.com/danielmichaels/shunt/internal/trace"
 )
 
 // Server defaults and limits
@@ -46,6 +47,7 @@ type webhookJob struct {
 	method  string
 	body    []byte
 	headers map[string]string
+	traceID string
 }
 
 // InboundServer handles HTTP requests and publishes to NATS.
@@ -237,8 +239,13 @@ func (s *InboundServer) webhookHandler(path string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// Log request
-		s.logger.Debug("webhook received",
+		traceID := r.Header.Get(trace.HTTPHeader)
+		if traceID == "" {
+			traceID = trace.NewID()
+		}
+
+		s.logger.Info("webhook received",
+			trace.LogKey, traceID,
 			"path", r.URL.Path,
 			"method", r.Method,
 			"remoteAddr", r.RemoteAddr)
@@ -249,7 +256,7 @@ func (s *InboundServer) webhookHandler(path string) http.HandlerFunc {
 		// Read request body (with size limit)
 		body, err := io.ReadAll(io.LimitReader(r.Body, MaxInboundBodySize))
 		if err != nil {
-			s.logger.Error("failed to read request body", "error", err)
+			s.logger.Error("failed to read request body", trace.LogKey, traceID, "error", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			if s.metrics != nil {
 				s.metrics.IncHTTPInboundRequestsTotal(path, r.Method, "400")
@@ -271,6 +278,7 @@ func (s *InboundServer) webhookHandler(path string) http.HandlerFunc {
 			method:  r.Method,
 			body:    body,
 			headers: headers,
+			traceID: traceID,
 		}
 
 		// Non-blocking send to the work queue.
@@ -278,6 +286,7 @@ func (s *InboundServer) webhookHandler(path string) http.HandlerFunc {
 		case s.workQueue <- job:
 			// Job successfully enqueued. Return 200 OK.
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set(trace.HTTPHeader, traceID)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(responseAccepted))
 			if s.metrics != nil {
@@ -307,6 +316,7 @@ func (s *InboundServer) processWebhookWithRecovery(workerID int, job webhookJob)
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error("panic recovered in inbound worker",
+				trace.LogKey, job.traceID,
 				"panic", r,
 				"workerID", workerID,
 				"path", job.path,
@@ -319,15 +329,17 @@ func (s *InboundServer) processWebhookWithRecovery(workerID int, job webhookJob)
 		}
 	}()
 
-	s.processWebhook(job.path, job.method, job.body, job.headers)
+	s.processWebhook(job.path, job.method, job.body, job.headers, job.traceID)
 }
 
 // processWebhook processes the webhook and publishes to NATS
-func (s *InboundServer) processWebhook(path, method string, body []byte, headers map[string]string) {
+func (s *InboundServer) processWebhook(path, method string, body []byte, headers map[string]string, traceID string) {
+	log := s.logger.With(trace.LogKey, traceID)
+
 	// Process through rule engine
 	actions, err := s.processor.ProcessHTTP(path, method, body, headers)
 	if err != nil {
-		s.logger.Error("failed to process webhook",
+		log.Error("failed to process webhook",
 			"path", path,
 			"method", method,
 			"error", err)
@@ -336,28 +348,30 @@ func (s *InboundServer) processWebhook(path, method string, body []byte, headers
 
 	// Publish all matched actions to NATS
 	for _, action := range actions {
+		action.TraceID = traceID
+
 		if action.NATS != nil {
-			if err := s.publishToNATS(action.NATS); err != nil {
-				s.logger.Error("failed to publish to NATS",
+			if err := s.publishToNATS(action.NATS, traceID); err != nil {
+				log.Error("failed to publish to NATS",
 					"path", path,
 					"method", method,
 					"subject", action.NATS.Subject,
+					"rule_name", action.RuleName,
 					"error", err)
 				if s.metrics != nil {
 					s.metrics.IncActionsTotal("error", action.RuleName)
 				}
 			} else {
-				s.logger.Debug("published to NATS",
+				log.Info("published to NATS",
 					"path", path,
-					"method", method,
-					"subject", action.NATS.Subject)
+					"subject", action.NATS.Subject,
+					"rule_name", action.RuleName)
 				if s.metrics != nil {
 					s.metrics.IncActionsTotal("success", action.RuleName)
 				}
 			}
 		} else if action.HTTP != nil {
-			// HTTP actions not supported in inbound server
-			s.logger.Warn("HTTP action in inbound webhook rule - this should use outbound client",
+			log.Warn("HTTP action in inbound webhook rule - this should use outbound client",
 				"path", path,
 				"url", action.HTTP.URL)
 		}
@@ -365,7 +379,7 @@ func (s *InboundServer) processWebhook(path, method string, body []byte, headers
 }
 
 // publishToNATS publishes a NATS action with retry logic
-func (s *InboundServer) publishToNATS(action *rule.NATSAction) error {
+func (s *InboundServer) publishToNATS(action *rule.NATSAction, traceID string) error {
 	// Prepare payload
 	var payloadBytes []byte
 	if action.Passthrough {
@@ -384,6 +398,13 @@ func (s *InboundServer) publishToNATS(action *rule.NATSAction) error {
 		for key, value := range action.Headers {
 			msg.Header.Set(key, value)
 		}
+	}
+
+	if traceID != "" {
+		if msg.Header == nil {
+			msg.Header = make(nats.Header)
+		}
+		msg.Header.Set(trace.NATSHeader, traceID)
 	}
 
 	// Publish based on mode

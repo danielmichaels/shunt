@@ -23,6 +23,7 @@ import (
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
+	"github.com/danielmichaels/shunt/internal/trace"
 )
 
 // Client limits and timeout constants
@@ -303,10 +304,12 @@ func (c *OutboundClient) messageWorker(ctx context.Context, sub *OutboundSubscri
 // processMessageWithRecovery wraps message processing with panic recovery and error handling
 // This ensures a single malformed message cannot crash the entire worker
 func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jetstream.Msg, subject string, workerID int) {
-	// Defer panic recovery to catch any panics during message processing
+	traceID := trace.FromNATSHeaders(msg.Headers())
+
 	defer func() {
 		if r := recover(); r != nil {
 			c.logger.Error("panic recovered in outbound message worker",
+				trace.LogKey, traceID,
 				"panic", r,
 				"subject", subject,
 				"workerID", workerID,
@@ -315,6 +318,7 @@ func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jet
 			// Terminate poison message to prevent redelivery loop
 			if termErr := msg.Term(); termErr != nil {
 				c.logger.Error("failed to terminate message after panic",
+					trace.LogKey, traceID,
 					"subject", subject,
 					"error", termErr)
 			}
@@ -326,7 +330,7 @@ func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jet
 	}()
 
 	// Process the message
-	if err := c.processMessage(ctx, msg); err != nil {
+	if err := c.processMessage(ctx, msg, traceID); err != nil {
 		c.logger.Error("failed to process outbound message",
 			"subject", subject,
 			"workerID", workerID,
@@ -357,13 +361,15 @@ func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jet
 }
 
 // processMessage processes a NATS message and makes HTTP requests
-func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg) error {
+func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg, traceID string) error {
 	start := time.Now()
+	log := c.logger.With(trace.LogKey, traceID)
+
 	if c.metrics != nil {
 		c.metrics.IncMessagesTotal("received")
 	}
 
-	c.logger.Debug("processing outbound message",
+	log.Info("processing outbound message",
 		"subject", msg.Subject(),
 		"size", len(msg.Data()))
 
@@ -385,16 +391,18 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg) 
 
 	// Execute all HTTP actions
 	for _, action := range actions {
+		action.TraceID = traceID
+
 		if action.HTTP != nil {
-			if err := c.executeHTTPAction(ctx, action.HTTP); err != nil {
-				c.logger.Error("failed to execute HTTP action",
+			if err := c.executeHTTPAction(ctx, action.HTTP, traceID); err != nil {
+				log.Error("failed to execute HTTP action",
 					"subject", msg.Subject(),
 					"url", action.HTTP.URL,
+					"rule_name", action.RuleName,
 					"error", err)
 				if c.metrics != nil {
 					c.metrics.IncActionsTotal("error", action.RuleName)
 				}
-				// Return error to NAK message
 				return fmt.Errorf("HTTP action failed: %w", err)
 			}
 
@@ -402,14 +410,13 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg) 
 				c.metrics.IncActionsTotal("success", action.RuleName)
 			}
 		} else if action.NATS != nil {
-			// NATS actions not typical in outbound, but log if present
-			c.logger.Debug("NATS action in outbound rule - consider using shunt instead",
+			log.Debug("NATS action in outbound rule - consider using shunt instead",
 				"subject", action.NATS.Subject)
 		}
 	}
 
 	duration := time.Since(start)
-	c.logger.Debug("outbound message processed",
+	log.Info("outbound message processed",
 		"subject", msg.Subject(),
 		"duration", duration,
 		"actionsExecuted", len(actions))
@@ -418,7 +425,7 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg) 
 }
 
 // executeHTTPAction makes an HTTP request with retry logic
-func (c *OutboundClient) executeHTTPAction(ctx context.Context, action *rule.HTTPAction) error {
+func (c *OutboundClient) executeHTTPAction(ctx context.Context, action *rule.HTTPAction, traceID string) error {
 	// Get retry config (use defaults if not specified)
 	maxAttempts := 3
 	initialDelay := httpRetryInitialDelay
@@ -439,9 +446,8 @@ func (c *OutboundClient) executeHTTPAction(ctx context.Context, action *rule.HTT
 	// Retry loop with exponential backoff
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err := c.makeHTTPRequest(ctx, action)
+		err := c.makeHTTPRequest(ctx, action, traceID)
 		if err == nil {
-			// Success!
 			c.logger.Debug("HTTP request succeeded",
 				"url", action.URL,
 				"attempt", attempt)
@@ -482,7 +488,7 @@ func (c *OutboundClient) executeHTTPAction(ctx context.Context, action *rule.HTT
 }
 
 // makeHTTPRequest makes a single HTTP request
-func (c *OutboundClient) makeHTTPRequest(ctx context.Context, action *rule.HTTPAction) error {
+func (c *OutboundClient) makeHTTPRequest(ctx context.Context, action *rule.HTTPAction, traceID string) error {
 	start := time.Now()
 
 	// Prepare payload
@@ -497,6 +503,11 @@ func (c *OutboundClient) makeHTTPRequest(ctx context.Context, action *rule.HTTPA
 	req, err := http.NewRequestWithContext(ctx, action.Method, action.URL, body)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Inject trace header before user headers so users can override
+	if traceID != "" {
+		req.Header.Set(trace.HTTPHeader, traceID)
 	}
 
 	// Add headers
@@ -533,7 +544,8 @@ func (c *OutboundClient) makeHTTPRequest(ctx context.Context, action *rule.HTTPA
 
 	// Check status code (2xx = success)
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		c.logger.Debug("HTTP request successful",
+		c.logger.Info("HTTP request successful",
+			trace.LogKey, traceID,
 			"url", action.URL,
 			"method", action.Method,
 			"statusCode", resp.StatusCode,
