@@ -171,6 +171,69 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 	return nil
 }
 
+// Refresh re-discovers all JetStream streams, replacing the previous stream list.
+// This is used to pick up streams created after initial startup.
+func (sr *StreamResolver) Refresh(ctx context.Context) error {
+	sr.logger.Info("refreshing JetStream stream list")
+
+	discoverCtx, cancel := context.WithTimeout(ctx, streamDiscoveryTimeout)
+	defer cancel()
+
+	streamLister := sr.jetStream.ListStreams(discoverCtx)
+
+	newStreams := make([]StreamInfo, 0)
+	streamNames := make([]string, 0)
+
+	for info := range streamLister.Info() {
+		streamNames = append(streamNames, info.Config.Name)
+
+		streamInfo := StreamInfo{
+			Name:    info.Config.Name,
+			Storage: info.Config.Storage,
+		}
+
+		if len(info.Config.Subjects) > 0 {
+			streamInfo.Subjects = info.Config.Subjects
+		}
+
+		if info.Config.Mirror != nil {
+			streamInfo.IsMirror = true
+			filter := info.Config.Mirror.FilterSubject
+			if filter == "" {
+				filter = ">"
+			}
+			streamInfo.MirrorFilter = filter
+		}
+
+		if len(info.Config.Sources) > 0 {
+			streamInfo.IsSource = true
+			streamInfo.SourceFilters = make([]string, 0, len(info.Config.Sources))
+			for _, source := range info.Config.Sources {
+				filter := source.FilterSubject
+				if filter == "" {
+					filter = ">"
+				}
+				streamInfo.SourceFilters = append(streamInfo.SourceFilters, filter)
+			}
+		}
+
+		newStreams = append(newStreams, streamInfo)
+	}
+
+	if streamLister.Err() != nil {
+		return fmt.Errorf("error during stream refresh: %w", streamLister.Err())
+	}
+
+	sr.streams = newStreams
+	sr.discovered = true
+
+	sr.logger.Info("stream refresh complete",
+		"totalStreams", len(sr.streams),
+		"streamNames", streamNames)
+
+	return nil
+}
+
 // FindStreamForSubject finds the optimal stream for the given subject by collecting
 // all potential matches and sorting them by a series of explicit priority rules.
 func (sr *StreamResolver) FindStreamForSubject(subject string) (string, error) {

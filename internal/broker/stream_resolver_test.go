@@ -353,6 +353,36 @@ func TestFindStreamForSubject(t *testing.T) {
 	}
 }
 
+func TestFindStreamForSubject_AfterManualStreamAddition(t *testing.T) {
+	// Simulate the scenario: startup discovers streams, then a new stream is added later.
+	// After manually adding the stream info (simulating what Refresh does), FindStreamForSubject should find it.
+	sr := newTestResolverWithStreams([]StreamInfo{
+		{Name: "SENSORS", Subjects: []string{"sensors.>"}, Storage: jetstream.MemoryStorage},
+	})
+
+	// Subject on a stream that doesn't exist yet
+	_, err := sr.FindStreamForSubject("events.user.login")
+	if err == nil {
+		t.Fatal("expected error for unmapped subject before refresh, got nil")
+	}
+
+	// Simulate what Refresh does: add the new stream to the resolver's list
+	sr.streams = append(sr.streams, StreamInfo{
+		Name:     "EVENTS",
+		Subjects: []string{"events.>"},
+		Storage:  jetstream.FileStorage,
+	})
+
+	// Now it should be found
+	streamName, err := sr.FindStreamForSubject("events.user.login")
+	if err != nil {
+		t.Fatalf("expected no error after adding stream, got: %v", err)
+	}
+	if streamName != "EVENTS" {
+		t.Errorf("expected stream EVENTS, got %s", streamName)
+	}
+}
+
 func TestValidateSubjects(t *testing.T) {
 	tests := []struct {
 		name     string

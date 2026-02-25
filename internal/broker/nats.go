@@ -146,7 +146,20 @@ func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
 	// Find which stream handles this subject
 	streamName, err := b.streamResolver.FindStreamForSubject(subject)
 	if err != nil {
-		return fmt.Errorf("cannot create consumer for subject '%s': %w", subject, err)
+		if !errors.Is(err, ErrNoStreamFound) {
+			return fmt.Errorf("cannot create consumer for subject '%s': %w", subject, err)
+		}
+		// Stream not found — it may have been created after startup. Refresh and retry.
+		b.logger.Info("stream not found for subject, refreshing stream list",
+			"subject", subject)
+		if refreshErr := b.streamResolver.Refresh(b.ctx); refreshErr != nil {
+			b.logger.Error("failed to refresh stream list", "error", refreshErr)
+			return fmt.Errorf("cannot create consumer for subject '%s': %w", subject, err)
+		}
+		streamName, err = b.streamResolver.FindStreamForSubject(subject)
+		if err != nil {
+			return fmt.Errorf("cannot create consumer for subject '%s' (after stream refresh): %w", subject, err)
+		}
 	}
 
 	// Generate a valid consumer name
