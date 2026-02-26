@@ -136,6 +136,13 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 
 	m.mu.Unlock()
 
+	// Proactively refresh the stream list before creating consumers.
+	// Streams may have been created since the last discovery or rule update.
+	if err := m.broker.RefreshStreams(); err != nil {
+		m.logger.Warn("failed to refresh stream list before creating subscriptions",
+			"key", key, "error", err)
+	}
+
 	for subject := range newSubjects {
 		if !previousSubjects[subject] {
 			if err := m.broker.AddAndStartSubscription(subject); err != nil {

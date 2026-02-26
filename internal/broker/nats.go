@@ -353,6 +353,12 @@ func (b *NATSBroker) FindStreamForSubject(subject string) (string, error) {
 	return b.streamResolver.FindStreamForSubject(subject)
 }
 
+// RefreshStreams re-discovers JetStream streams so recently created streams
+// are available before creating consumers for new rules.
+func (b *NATSBroker) RefreshStreams() error {
+	return b.streamResolver.Refresh(b.ctx)
+}
+
 // GetSubscriptionManager returns the subscription manager
 func (b *NATSBroker) GetSubscriptionManager() *SubscriptionManager {
 	return b.subscriptionMgr
