@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -29,6 +30,7 @@ type StreamResolver struct {
 	streams    []StreamInfo
 	logger     *slog.Logger
 	discovered bool
+	mu         sync.RWMutex
 }
 
 // StreamInfo holds comprehensive information about a JetStream stream
@@ -224,11 +226,13 @@ func (sr *StreamResolver) Refresh(ctx context.Context) error {
 		return fmt.Errorf("error during stream refresh: %w", streamLister.Err())
 	}
 
+	sr.mu.Lock()
 	sr.streams = newStreams
 	sr.discovered = true
+	sr.mu.Unlock()
 
 	sr.logger.Info("stream refresh complete",
-		"totalStreams", len(sr.streams),
+		"totalStreams", len(newStreams),
 		"streamNames", streamNames)
 
 	return nil
@@ -237,7 +241,12 @@ func (sr *StreamResolver) Refresh(ctx context.Context) error {
 // FindStreamForSubject finds the optimal stream for the given subject by collecting
 // all potential matches and sorting them by a series of explicit priority rules.
 func (sr *StreamResolver) FindStreamForSubject(subject string) (string, error) {
-	if !sr.discovered {
+	sr.mu.RLock()
+	streams := sr.streams
+	discovered := sr.discovered
+	sr.mu.RUnlock()
+
+	if !discovered {
 		return "", fmt.Errorf("streams not discovered - call Discover() first")
 	}
 
@@ -247,7 +256,7 @@ func (sr *StreamResolver) FindStreamForSubject(subject string) (string, error) {
 	var matches []streamMatch
 
 	// Check each stream and its subject filters
-	for _, stream := range sr.streams {
+	for _, stream := range streams {
 		// Check primary stream subjects
 		for _, filter := range stream.Subjects {
 			if sr.subjectMatches(subject, filter) {
@@ -594,8 +603,12 @@ func (sr *StreamResolver) isSystemStream(name string) bool {
 
 // getAllSubjectFilters returns all subject filters from all streams for error messages
 func (sr *StreamResolver) getAllSubjectFilters() []string {
+	sr.mu.RLock()
+	streams := sr.streams
+	sr.mu.RUnlock()
+
 	filters := make([]string, 0)
-	for _, stream := range sr.streams {
+	for _, stream := range streams {
 		// Primary subjects
 		for _, subject := range stream.Subjects {
 			filters = append(filters, fmt.Sprintf("%s (stream: %s, storage: %s)",
@@ -617,18 +630,26 @@ func (sr *StreamResolver) getAllSubjectFilters() []string {
 
 // GetStreams returns all discovered streams (useful for debugging/logging)
 func (sr *StreamResolver) GetStreams() []StreamInfo {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
 	return sr.streams
 }
 
 // GetStreamCount returns the number of discovered streams
 func (sr *StreamResolver) GetStreamCount() int {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
 	return len(sr.streams)
 }
 
 // ValidateSubjects checks if all given subjects can be mapped to streams
 // Returns an error with detailed information about unmapped subjects
 func (sr *StreamResolver) ValidateSubjects(subjects []string) error {
-	if !sr.discovered {
+	sr.mu.RLock()
+	discovered := sr.discovered
+	sr.mu.RUnlock()
+
+	if !discovered {
 		return fmt.Errorf("streams not discovered - call Discover() first")
 	}
 
