@@ -1,5 +1,8 @@
 # Shunt
 
+> [!CAUTION]
+> This is in active development - the API should be considered unstable
+
 A high-performance, rule-based message router for NATS JetStream with an integrated HTTP gateway and automated token management.
 
 Rules are stored in NATS KV and hot-reloaded via KV Watch — no restarts required.
@@ -157,3 +160,7 @@ Key metrics:
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
+
+## Inspiration 
+
+This is a partial re-write of the fantastic [rule-router](#) which is robust and feature complete. You should use it!
