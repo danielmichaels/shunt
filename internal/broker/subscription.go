@@ -4,7 +4,6 @@ package broker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -410,7 +409,7 @@ func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream
 		sm.metrics.IncMessagesTotal("received")
 	}
 
-	log.Info("processing message", "subject", msg.Subject(), "size", len(msg.Data()))
+	log.Debug("processing message", "subject", msg.Subject(), "size", len(msg.Data()))
 
 	// Extract headers
 	headers := make(map[string]string)
@@ -457,7 +456,7 @@ func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream
 	}
 
 	duration := time.Since(start)
-	log.Info("message processed", "subject", msg.Subject(), "duration", duration, "actionsPublished", len(actions))
+	log.Debug("message processed", "subject", msg.Subject(), "duration", duration, "actionsPublished", len(actions))
 	return nil
 }
 
@@ -613,11 +612,8 @@ func (sm *SubscriptionManager) publishCore(ctx context.Context, action *rule.NAT
 // Stop gracefully shuts down all subscriptions.
 func (sm *SubscriptionManager) Stop() error {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
 	sm.logger.Info("stopping all subscriptions", "count", len(sm.subscriptions))
 
-	// Step 1: Stop all iterators gracefully (drains pending messages)
 	for _, sub := range sm.subscriptions {
 		if sub.iterator != nil {
 			sm.logger.Debug("stopping Messages() iterator", "subject", sub.Subject)
@@ -626,14 +622,13 @@ func (sm *SubscriptionManager) Stop() error {
 		}
 	}
 
-	// Step 2: Cancel contexts to unblock workers immediately
 	for _, sub := range sm.subscriptions {
 		if sub.cancel != nil {
 			sub.cancel()
 		}
 	}
+	sm.mu.Unlock()
 
-	// Step 3: Wait for all workers to finish
 	sm.logger.Debug("waiting for all workers to finish")
 	sm.wg.Wait()
 
@@ -652,24 +647,9 @@ func (sm *SubscriptionManager) GetSubscriptionCount() int {
 // This is used to decide whether to Terminate or Nak a message.
 //
 // Terminal errors are those where retrying the message would never succeed,
-// such as malformed JSON or structurally invalid payloads.
+// such as malformed payloads.
 func isTerminalError(err error) bool {
-	// Check for our custom terminal error types
-	if errors.Is(err, ErrMalformedJSON) || errors.Is(err, ErrInvalidPayload) {
-		return true
-	}
-
-	// Check for standard library JSON syntax errors
-	var syntaxErr *json.SyntaxError
-	if errors.As(err, &syntaxErr) {
-		return true
-	}
-
-	// Check for JSON unmarshalling type errors (wrong type in payload)
-	var unmarshalTypeErr *json.UnmarshalTypeError
-	if errors.As(err, &unmarshalTypeErr) {
-		return true
-	}
-
-	return false
+	return errors.Is(err, ErrMalformedJSON) ||
+		errors.Is(err, ErrInvalidPayload) ||
+		errors.Is(err, rule.ErrMalformedPayload)
 }
