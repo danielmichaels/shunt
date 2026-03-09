@@ -22,9 +22,8 @@ const (
 
 type Processor struct {
 	index           *RuleIndex
-	allRules        []*Rule
-	httpPathIndex   map[string][]*Rule
-	kvRules         atomic.Value // holds map[string][]*Rule (subscription subject → rules)
+	kvRules         atomic.Value // holds map[string][]*Rule (NATS subject → rules)
+	httpKVRules     atomic.Value // holds map[string][]*Rule (HTTP path → rules)
 	timeProvider    TimeProvider
 	kvContext       *KVContext
 	logger          *slog.Logger
@@ -34,7 +33,7 @@ type Processor struct {
 	templater       *TemplateEngine
 	sigVerification *SignatureVerification
 	debouncer       *Debouncer
-	maxForEachIters int // Configurable forEach iteration limit
+	maxForEachIters int
 }
 
 type ProcessorStats struct {
@@ -116,8 +115,6 @@ func (p *Processor) extractForEachArray(forEachTemplate string, context *Evaluat
 func NewProcessor(log *slog.Logger, metrics *metrics.Metrics, kvCtx *KVContext, sigVerification *SignatureVerification) *Processor {
 	p := &Processor{
 		index:           NewRuleIndex(log),
-		allRules:        make([]*Rule, 0),
-		httpPathIndex:   make(map[string][]*Rule),
 		timeProvider:    NewSystemTimeProvider(),
 		kvContext:       kvCtx,
 		logger:          log,
@@ -150,67 +147,49 @@ func (p *Processor) SetMaxForEachIterations(max int) {
 	p.logger.Info("forEach iteration limit configured", "maxIterations", max)
 }
 
-// LoadRules loads rules and indexes them by trigger type
-func (p *Processor) LoadRules(rules []Rule) error {
-	p.logger.Info("loading rules into processor", "ruleCount", len(rules))
-
-	p.index.Clear()
-	p.allRules = make([]*Rule, 0, len(rules))
-	p.httpPathIndex = make(map[string][]*Rule)
-
-	natsCount := 0
-	httpCount := 0
-
-	for i := range rules {
-		rule := &rules[i]
-		p.allRules = append(p.allRules, rule)
-
-		if rule.Trigger.NATS != nil {
-			p.index.Add(rule)
-			natsCount++
-		}
-
-		if rule.Trigger.HTTP != nil {
-			path := rule.Trigger.HTTP.Path
-			p.httpPathIndex[path] = append(p.httpPathIndex[path], rule)
-			httpCount++
-
-			p.logger.Debug("indexed HTTP rule",
-				"path", path,
-				"method", rule.Trigger.HTTP.Method)
-		}
-	}
-
-	if p.metrics != nil {
-		p.metrics.SetRulesActive(float64(natsCount + httpCount))
-	}
-
-	p.logger.Info("rules loaded",
-		"total", len(rules),
-		"natsRules", natsCount,
-		"httpRules", httpCount,
-		"httpPaths", len(p.httpPathIndex))
-
-	return nil
-}
-
 // GetSubjects returns all NATS subjects for subscription setup
 func (p *Processor) GetSubjects() []string {
 	return p.index.GetSubscriptionSubjects()
 }
 
-// GetHTTPPaths returns all unique HTTP paths for route setup
-func (p *Processor) GetHTTPPaths() []string {
-	paths := make([]string, 0, len(p.httpPathIndex))
-	for path := range p.httpPathIndex {
-		paths = append(paths, path)
+// LoadRules is used by CLI tooling (lint, test, check) to load rules from files.
+// In serve mode, rules arrive via KV Watch which calls ReplaceRules/ReplaceHTTPRules directly.
+func (p *Processor) LoadRules(rules []Rule) error {
+	p.index.Clear()
+	natsRules := make(map[string][]*Rule)
+	httpRules := make(map[string][]*Rule)
+
+	for i := range rules {
+		r := &rules[i]
+		if r.Trigger.NATS != nil {
+			p.index.Add(r)
+			natsRules[r.Trigger.NATS.Subject] = append(natsRules[r.Trigger.NATS.Subject], r)
+		}
+		if r.Trigger.HTTP != nil {
+			httpRules[r.Trigger.HTTP.Path] = append(httpRules[r.Trigger.HTTP.Path], r)
+		}
 	}
-	return paths
+
+	p.ReplaceRules(natsRules)
+	p.ReplaceHTTPRules(httpRules)
+
+	if p.metrics != nil {
+		p.metrics.SetRulesActive(float64(len(rules)))
+	}
+	return nil
 }
 
-// GetAllRules returns all loaded rules (both NATS and HTTP)
-func (p *Processor) GetAllRules() []*Rule {
-	return p.allRules
+// ReplaceHTTPRules atomically swaps the KV-loaded HTTP rule set.
+// Called by RuleKVManager when KV Watch detects changes.
+// The map is keyed by HTTP path (e.g., "/webhook/github").
+func (p *Processor) ReplaceHTTPRules(rules map[string][]*Rule) {
+	p.httpKVRules.Store(rules)
+
+	total := 0
+	for _, rs := range rules {
+		total += len(rs)
+	}
+	p.logger.Info("KV HTTP rules replaced", "paths", len(rules), "totalRules", total)
 }
 
 // ProcessNATS processes a NATS message through the rule engine
@@ -275,18 +254,22 @@ func (p *Processor) ProcessHTTP(path, method string, payload []byte, headers map
 	return p.evaluateRules(rules, context, "http")
 }
 
-// findHTTPRules finds all HTTP rules matching the path and method
+// findHTTPRules finds all HTTP rules matching the path and method.
+// Reads from the atomically-swapped httpKVRules so it is safe to call
+// concurrently with ReplaceHTTPRules.
 func (p *Processor) findHTTPRules(path, method string) []*Rule {
-	rulesForPath, exists := p.httpPathIndex[path]
-	if !exists || len(rulesForPath) == 0 {
+	ruleMap, _ := p.httpKVRules.Load().(map[string][]*Rule)
+	if ruleMap == nil {
+		return nil
+	}
+
+	rulesForPath := ruleMap[path]
+	if len(rulesForPath) == 0 {
 		p.logger.Debug("no HTTP rules for path", "path", path)
 		return nil
 	}
 
 	if method == "" {
-		p.logger.Debug("HTTP rule lookup complete (all methods)",
-			"path", path,
-			"matchedRules", len(rulesForPath))
 		return rulesForPath
 	}
 
@@ -294,10 +277,6 @@ func (p *Processor) findHTTPRules(path, method string) []*Rule {
 	for _, rule := range rulesForPath {
 		if rule.Trigger.HTTP.Method == "" || rule.Trigger.HTTP.Method == method {
 			matching = append(matching, rule)
-			p.logger.Debug("HTTP rule matched",
-				"path", path,
-				"method", method,
-				"ruleMethod", rule.Trigger.HTTP.Method)
 		}
 	}
 
