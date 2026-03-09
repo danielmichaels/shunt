@@ -38,12 +38,12 @@ tasks:
   test:
     desc: Run all tests
     cmds:
-      - go test ./...
+      - go test ./... {{.CLI_ARGS}}
 
   test:verbose:
     desc: Run all tests with verbose output
     cmds:
-      - go test -v ./...
+      - go test -v ./... {{.CLI_ARGS}}
 
   test:cover:
     desc: Run tests with HTML coverage report
@@ -54,7 +54,7 @@ tasks:
   lint:
     desc: Run golangci-lint
     cmds:
-      - golangci-lint run ./...
+      - golangci-lint run ./... {{.CLI_ARGS}}
 
   fmt:
     desc: Format code and tidy modules

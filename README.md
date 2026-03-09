@@ -1,5 +1,7 @@
 # Shunt
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/danielmichaels/shunt)
+
 > [!CAUTION]
 > This is in active development - the API should be considered unstable
 
@@ -159,8 +161,9 @@ Key metrics:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
+This project is licensed under the Apache 2 License - see the [LICENSE](./LICENSE) file for details.
 
 ## Inspiration 
 
-This is a partial re-write of the fantastic [rule-router](#) which is robust and feature complete. You should use it!
+This is a partial re-write of the fantastic [rule-router](https://github.com/skeeeon/rule-router) which is robust and feature complete. You should use it!
+
