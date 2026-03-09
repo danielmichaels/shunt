@@ -19,14 +19,7 @@ import (
 	"github.com/danielmichaels/shunt/internal/rule"
 )
 
-// Timeout constants for RouterApp operations
-const (
-	// metricsShutdownTimeout is the maximum time to wait for the metrics server to shutdown
-	metricsShutdownTimeout = 5 * time.Second
-
-	// outboundSetupTimeout is the maximum time to wait for outbound subscriptions to be configured
-	outboundSetupTimeout = 60 * time.Second
-)
+const metricsShutdownTimeout = 5 * time.Second
 
 // Verify RouterApp implements lifecycle.Application interface at compile time
 var _ lifecycle.Application = (*RouterApp)(nil)
@@ -158,37 +151,6 @@ func (app *RouterApp) startGateway(ctx context.Context) error {
 		&app.config.HTTP.Client,
 	)
 
-	allRules := app.processor.GetAllRules()
-	outboundSubjects := make(map[string]bool)
-
-	setupCtx, cancel := context.WithTimeout(context.Background(), outboundSetupTimeout)
-	defer cancel()
-
-	for _, r := range allRules {
-		if r.Trigger.NATS != nil && r.Action.HTTP != nil {
-			subject := r.Trigger.NATS.Subject
-			if outboundSubjects[subject] {
-				continue
-			}
-			outboundSubjects[subject] = true
-
-			if err := app.broker.CreateConsumerForSubject(subject); err != nil {
-				return fmt.Errorf("failed to create consumer for subject '%s': %w", subject, err)
-			}
-
-			streamName, err := app.broker.FindStreamForSubject(subject)
-			if err != nil {
-				return fmt.Errorf("failed to find stream for subject '%s': %w", subject, err)
-			}
-			consumerName := app.broker.GetConsumerName(subject)
-
-			workers := app.config.NATS.Consumers.WorkerCount
-			if err := app.outboundClient.AddSubscription(setupCtx, streamName, consumerName, subject, workers); err != nil {
-				return fmt.Errorf("failed to add outbound subscription for '%s': %w", subject, err)
-			}
-		}
-	}
-
 	if err := app.inboundServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start inbound server: %w", err)
 	}
@@ -197,9 +159,7 @@ func (app *RouterApp) startGateway(ctx context.Context) error {
 		return fmt.Errorf("failed to start outbound client: %w", err)
 	}
 
-	app.logger.Info("gateway started",
-		"httpAddress", app.config.HTTP.Server.Address,
-		"outboundSubscriptions", len(outboundSubjects))
+	app.logger.Info("gateway started", "httpAddress", app.config.HTTP.Server.Address)
 
 	return nil
 }
