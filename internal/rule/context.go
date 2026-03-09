@@ -4,6 +4,8 @@ package rule
 
 import (
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -13,6 +15,9 @@ import (
 
 	"log/slog"
 )
+
+// ErrMalformedPayload indicates the message payload cannot be parsed and retrying will not help.
+var ErrMalformedPayload = errors.New("malformed payload")
 
 // System field prefixes for @ variables
 const (
@@ -110,7 +115,7 @@ func NewEvaluationContext(
 					"preview", truncateString(string(payload), 50))
 			} else {
 				// Not valid UTF-8 - cannot process as text
-				return nil, err
+				return nil, fmt.Errorf("%w: %w", ErrMalformedPayload, err)
 			}
 		}
 	}

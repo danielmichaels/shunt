@@ -79,17 +79,16 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 	streamLister := sr.jetStream.ListStreams(discoverCtx)
 
 	streamNames := make([]string, 0)
+	newStreams := make([]StreamInfo, 0)
 
-	// Iterate over stream info
 	for info := range streamLister.Info() {
 		streamNames = append(streamNames, info.Config.Name)
 
 		streamInfo := StreamInfo{
 			Name:    info.Config.Name,
-			Storage: info.Config.Storage, // Memory or File
+			Storage: info.Config.Storage,
 		}
 
-		// Primary stream: has Config.Subjects defined
 		if len(info.Config.Subjects) > 0 {
 			streamInfo.Subjects = info.Config.Subjects
 			sr.logger.Debug("discovered primary stream",
@@ -99,14 +98,11 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 				"messages", info.State.Msgs)
 		}
 
-		// Mirror stream: read filter from mirror configuration
 		if info.Config.Mirror != nil {
 			streamInfo.IsMirror = true
-
-			// Mirror filter subject (defaults to ">" if not specified)
 			filter := info.Config.Mirror.FilterSubject
 			if filter == "" {
-				filter = ">" // Default: mirror everything from source
+				filter = ">"
 			}
 			streamInfo.MirrorFilter = filter
 
@@ -118,7 +114,6 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 				"messages", info.State.Msgs)
 		}
 
-		// Sourced stream: read filters from each source
 		if len(info.Config.Sources) > 0 {
 			streamInfo.IsSource = true
 			streamInfo.SourceFilters = make([]string, 0, len(info.Config.Sources))
@@ -126,7 +121,7 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 			for _, source := range info.Config.Sources {
 				filter := source.FilterSubject
 				if filter == "" {
-					filter = ">" // Default: source everything
+					filter = ">"
 				}
 				streamInfo.SourceFilters = append(streamInfo.SourceFilters, filter)
 
@@ -138,10 +133,8 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 			}
 		}
 
-		// Store the stream info
-		sr.streams = append(sr.streams, streamInfo)
+		newStreams = append(newStreams, streamInfo)
 
-		// Summary log for this stream
 		sr.logger.Info("stream discovered",
 			"name", streamInfo.Name,
 			"storage", streamInfo.Storage,
@@ -149,26 +142,42 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 			"filterCount", sr.getFilterCount(streamInfo))
 	}
 
-	// Check for errors during iteration
 	if streamLister.Err() != nil {
 		return fmt.Errorf("error during stream discovery: %w", streamLister.Err())
 	}
 
-	if len(sr.streams) == 0 {
+	if len(newStreams) == 0 {
 		sr.logger.Warn("no JetStream streams found - rules will fail to initialize")
 		return fmt.Errorf("no JetStream streams found - please create streams before starting shunt")
 	}
 
+	sr.mu.Lock()
+	sr.streams = newStreams
 	sr.discovered = true
+	sr.mu.Unlock()
 
-	// Log comprehensive discovery summary
+	memCount, fileCount, mirrorCount, sourceCount := 0, 0, 0, 0
+	for _, s := range newStreams {
+		if s.Storage == jetstream.MemoryStorage {
+			memCount++
+		} else {
+			fileCount++
+		}
+		if s.IsMirror {
+			mirrorCount++
+		}
+		if s.IsSource {
+			sourceCount++
+		}
+	}
+
 	sr.logger.Info("stream discovery complete",
-		"totalStreams", len(sr.streams),
+		"totalStreams", len(newStreams),
 		"streamNames", streamNames,
-		"memoryStreams", sr.countByStorage(jetstream.MemoryStorage),
-		"fileStreams", sr.countByStorage(jetstream.FileStorage),
-		"mirrorStreams", sr.countMirrors(),
-		"sourcedStreams", sr.countSources())
+		"memoryStreams", memCount,
+		"fileStreams", fileCount,
+		"mirrorStreams", mirrorCount,
+		"sourcedStreams", sourceCount)
 
 	return nil
 }
@@ -699,32 +708,3 @@ func (sr *StreamResolver) getFilterCount(stream StreamInfo) int {
 	return count
 }
 
-func (sr *StreamResolver) countByStorage(storage jetstream.StorageType) int {
-	count := 0
-	for _, stream := range sr.streams {
-		if stream.Storage == storage {
-			count++
-		}
-	}
-	return count
-}
-
-func (sr *StreamResolver) countMirrors() int {
-	count := 0
-	for _, stream := range sr.streams {
-		if stream.IsMirror {
-			count++
-		}
-	}
-	return count
-}
-
-func (sr *StreamResolver) countSources() int {
-	count := 0
-	for _, stream := range sr.streams {
-		if stream.IsSource {
-			count++
-		}
-	}
-	return count
-}

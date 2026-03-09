@@ -17,23 +17,23 @@ func NewDebouncer() *Debouncer {
 }
 
 // ShouldFire returns true if the debounce window has expired (or no prior fire exists).
-// On true, it atomically updates the last-fired timestamp.
+// Uses LoadOrStore for the initial case and CompareAndSwap at the window boundary so
+// exactly one concurrent caller fires when the window expires.
 func (d *Debouncer) ShouldFire(key string, duration time.Duration) bool {
 	now := time.Now()
 
-	val, loaded := d.lastFired.Load(key)
+	actual, loaded := d.lastFired.LoadOrStore(key, now)
 	if !loaded {
-		d.lastFired.Store(key, now)
-		return true
+		return true // first call for this key
 	}
 
-	lastTime := val.(time.Time)
-	if now.Sub(lastTime) >= duration {
-		d.lastFired.Store(key, now)
-		return true
+	lastTime := actual.(time.Time)
+	if now.Sub(lastTime) < duration {
+		return false
 	}
 
-	return false
+	// Window expired: only one concurrent caller wins the CAS and fires.
+	return d.lastFired.CompareAndSwap(key, lastTime, now)
 }
 
 // DebounceKey builds the debounce map key from trigger and action subjects.

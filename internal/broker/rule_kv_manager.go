@@ -20,6 +20,7 @@ type RuleKVManager struct {
 	logger        *slog.Logger
 	currentRules  map[string][]rule.Rule
 	mu            sync.Mutex
+	wg            sync.WaitGroup
 	ready         chan struct{}
 	readyOnce     sync.Once
 	watcher       jetstream.KeyWatcher
@@ -73,7 +74,11 @@ func (m *RuleKVManager) Watch(ctx context.Context) error {
 		}
 
 		m.watcher = watcher
-		go m.processWatchUpdates(ctx, watcher)
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			m.processWatchUpdates(ctx, watcher)
+		}()
 
 		m.logger.Info("rule KV watcher started", "bucket", m.kvBucket)
 	})
@@ -86,6 +91,7 @@ func (m *RuleKVManager) Stop() {
 			m.logger.Error("failed to stop rule KV watcher", "error", err)
 		}
 	}
+	m.wg.Wait()
 }
 
 func (m *RuleKVManager) processWatchUpdates(ctx context.Context, watcher jetstream.KeyWatcher) {
@@ -194,16 +200,21 @@ func (m *RuleKVManager) handleRuleDelete(key string) {
 }
 
 func (m *RuleKVManager) pushRulesToProcessor() {
-	merged := make(map[string][]*rule.Rule)
+	natsRules := make(map[string][]*rule.Rule)
+	httpRules := make(map[string][]*rule.Rule)
 	for _, rules := range m.currentRules {
 		for i := range rules {
 			r := &rules[i]
 			if r.Trigger.NATS != nil {
-				merged[r.Trigger.NATS.Subject] = append(merged[r.Trigger.NATS.Subject], r)
+				natsRules[r.Trigger.NATS.Subject] = append(natsRules[r.Trigger.NATS.Subject], r)
+			}
+			if r.Trigger.HTTP != nil {
+				httpRules[r.Trigger.HTTP.Path] = append(httpRules[r.Trigger.HTTP.Path], r)
 			}
 		}
 	}
-	m.processor.ReplaceRules(merged)
+	m.processor.ReplaceRules(natsRules)
+	m.processor.ReplaceHTTPRules(httpRules)
 }
 
 func (m *RuleKVManager) WaitReady(ctx context.Context) error {

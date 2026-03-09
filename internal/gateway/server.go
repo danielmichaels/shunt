@@ -131,16 +131,13 @@ func NewInboundServer(
 func (s *InboundServer) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
-	// Register handlers for all HTTP paths from rules
-	paths := s.processor.GetHTTPPaths()
-	for _, path := range paths {
-		// Capture path in closure
-		handlerPath := path
-		mux.HandleFunc(handlerPath, s.webhookHandler(handlerPath))
-		s.logger.Info("registered HTTP handler", "path", handlerPath)
-	}
+	// Catch-all: routes every request through the processor's live rule index.
+	// Rules are loaded from KV at runtime so paths are dynamic — no static registration needed.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		s.webhookHandler(r.URL.Path)(w, r)
+	})
 
-	// Health check endpoint
+	// Health check endpoints (registered after "/" so ServeMux prefers them)
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/healthz", s.healthHandler)
 
@@ -169,7 +166,6 @@ func (s *InboundServer) Start(ctx context.Context) error {
 
 	s.logger.Info("starting HTTP inbound server",
 		"address", ln.Addr().String(),
-		"paths", len(paths),
 		"workers", s.serverCfg.InboundWorkerCount,
 		"queueSize", s.serverCfg.InboundQueueSize)
 
