@@ -2,7 +2,6 @@ package broker
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -10,44 +9,30 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/gateway"
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/rule"
 )
 
-type mockOutboundSubscriber struct {
-	mu       sync.Mutex
-	added    map[string]bool
-	removed  map[string]bool
-	addErr   error
-}
-
-func newMockOutboundSubscriber() *mockOutboundSubscriber {
-	return &mockOutboundSubscriber{
-		added:   make(map[string]bool),
-		removed: make(map[string]bool),
+func newTestOutboundClient(t *testing.T, js jetstream.JetStream, processor *rule.Processor) *gateway.OutboundClient {
+	t.Helper()
+	log := logger.NewNopLogger()
+	consumerCfg := &gateway.ConsumerConfig{
+		WorkerCount:    1,
+		FetchBatchSize: 10,
+		FetchTimeout:   5 * time.Second,
+		MaxAckPending:  100,
+		AckWaitTimeout: 30 * time.Second,
+		MaxDeliver:     3,
 	}
-}
-
-func (m *mockOutboundSubscriber) AddOutboundSubscription(_ context.Context, _, _, subject string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.addErr != nil {
-		return m.addErr
+	httpCfg := &config.HTTPClientConfig{
+		Timeout:             30 * time.Second,
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     90 * time.Second,
 	}
-	m.added[subject] = true
-	return nil
-}
-
-func (m *mockOutboundSubscriber) RemoveOutboundSubscription(subject string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.removed[subject] = true
-}
-
-func (m *mockOutboundSubscriber) hasSubject(subject string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.added[subject]
+	return gateway.NewOutboundClient(log, nil, processor, js, consumerCfg, httpCfg)
 }
 
 const testHTTPRuleYAML = `
@@ -287,9 +272,10 @@ func TestNATSRuleFromKV_RejectedWhenNoStream(t *testing.T) {
 	assert.Empty(t, actions, "rule with no matching stream should be rejected and not loaded")
 }
 
-// TestHTTPActionRule_RegistersWithOutboundSubscriber verifies that a rule
-// with NATS trigger + HTTP action registers with the outbound subscriber.
-func TestHTTPActionRule_RegistersWithOutboundSubscriber(t *testing.T) {
+// TestHTTPActionRule_RegistersWithOutboundClient verifies that a rule
+// with NATS trigger + HTTP action creates a JetStream consumer and
+// registers with the real OutboundClient.
+func TestHTTPActionRule_RegistersWithOutboundClient(t *testing.T) {
 	_, js, cleanup := setupNATS(t)
 	defer cleanup()
 
@@ -311,7 +297,7 @@ func TestHTTPActionRule_RegistersWithOutboundSubscriber(t *testing.T) {
 	processor := rule.NewProcessor(log, nil, nil, nil)
 	natsBroker := newMinimalBroker(t, js)
 	rulesLoader := rule.NewRulesLoader(log, nil)
-	outbound := newMockOutboundSubscriber()
+	outbound := newTestOutboundClient(t, js, processor)
 
 	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
 	kvManager.SetOutboundSubscriber(outbound)
@@ -322,14 +308,21 @@ func TestHTTPActionRule_RegistersWithOutboundSubscriber(t *testing.T) {
 	defer cancel()
 	require.NoError(t, kvManager.WaitReady(readyCtx))
 
+	// Verify the outbound client has a subscription for the HTTP action rule's trigger subject
 	assert.Eventually(t, func() bool {
-		return outbound.hasSubject("sensors.>")
-	}, 3*time.Second, 50*time.Millisecond, "HTTP action rule should register trigger subject with outbound subscriber")
+		subs := outbound.GetSubscriptions()
+		for _, sub := range subs {
+			if sub.Subject == "sensors.>" {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 50*time.Millisecond, "HTTP action rule should create outbound subscription with real JetStream consumer")
 }
 
-// TestNATSOnlyRule_DoesNotRegisterWithOutboundSubscriber verifies that
-// a NATS-action-only rule does not register with the outbound subscriber.
-func TestNATSOnlyRule_DoesNotRegisterWithOutboundSubscriber(t *testing.T) {
+// TestNATSOnlyRule_NoOutboundSubscription verifies that a NATS-action-only
+// rule does not create an outbound subscription.
+func TestNATSOnlyRule_NoOutboundSubscription(t *testing.T) {
 	_, js, cleanup := setupNATS(t)
 	defer cleanup()
 
@@ -351,7 +344,7 @@ func TestNATSOnlyRule_DoesNotRegisterWithOutboundSubscriber(t *testing.T) {
 	processor := rule.NewProcessor(log, nil, nil, nil)
 	natsBroker := newMinimalBroker(t, js)
 	rulesLoader := rule.NewRulesLoader(log, nil)
-	outbound := newMockOutboundSubscriber()
+	outbound := newTestOutboundClient(t, js, processor)
 
 	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
 	kvManager.SetOutboundSubscriber(outbound)
@@ -362,16 +355,15 @@ func TestNATSOnlyRule_DoesNotRegisterWithOutboundSubscriber(t *testing.T) {
 	defer cancel()
 	require.NoError(t, kvManager.WaitReady(readyCtx))
 
-	// Give some time for processing
 	time.Sleep(200 * time.Millisecond)
 
-	assert.False(t, outbound.hasSubject("sensors.>"),
-		"NATS-only rule should NOT register with outbound subscriber")
+	subs := outbound.GetSubscriptions()
+	assert.Empty(t, subs, "NATS-only rule should NOT create outbound subscriptions")
 }
 
 // TestSetOutboundSubscriber_RetroactiveRegistration verifies that setting
-// the outbound subscriber after rules are already loaded registers existing
-// HTTP action rules retroactively.
+// the outbound subscriber after rules are already loaded creates JetStream
+// consumers and registers subscriptions retroactively.
 func TestSetOutboundSubscriber_RetroactiveRegistration(t *testing.T) {
 	_, js, cleanup := setupNATS(t)
 	defer cleanup()
@@ -395,7 +387,6 @@ func TestSetOutboundSubscriber_RetroactiveRegistration(t *testing.T) {
 	natsBroker := newMinimalBroker(t, js)
 	rulesLoader := rule.NewRulesLoader(log, nil)
 
-	// Start KV manager WITHOUT outbound subscriber (simulates startup order)
 	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
 
 	require.NoError(t, kvManager.Watch(ctx))
@@ -404,10 +395,11 @@ func TestSetOutboundSubscriber_RetroactiveRegistration(t *testing.T) {
 	defer cancel()
 	require.NoError(t, kvManager.WaitReady(readyCtx))
 
-	// Now set outbound subscriber (simulates startGateway after KV sync)
-	outbound := newMockOutboundSubscriber()
+	outbound := newTestOutboundClient(t, js, processor)
 	kvManager.SetOutboundSubscriber(outbound)
 
-	assert.True(t, outbound.hasSubject("sensors.>"),
-		"setting outbound subscriber should retroactively register existing HTTP action rules")
+	subs := outbound.GetSubscriptions()
+	require.Len(t, subs, 1, "retroactive registration should create exactly one outbound subscription")
+	assert.Equal(t, "sensors.>", subs[0].Subject)
+	assert.Equal(t, "SENSORS", subs[0].StreamName)
 }

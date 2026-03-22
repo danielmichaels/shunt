@@ -130,55 +130,73 @@ func (b *NATSBroker) InitializeSubscriptionManager(processor *rule.Processor) {
 
 // CreateConsumerForSubject creates a durable consumer for the given subject
 func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
-	b.logger.Debug("creating consumer for subject", "subject", subject)
-
-	// Check if consumer already exists for this subject
 	b.consumersMu.RLock()
-	existingConsumer, exists := b.consumers[subject]
+	_, exists := b.consumers[subject]
 	b.consumersMu.RUnlock()
 	if exists {
-		b.logger.Debug("consumer already exists for subject",
-			"subject", subject,
-			"consumer", existingConsumer)
 		return nil
 	}
 
-	// Find which stream handles this subject
+	streamName, consumerName, err := b.createConsumer(subject, "")
+	if err != nil {
+		return err
+	}
+
+	b.consumersMu.Lock()
+	b.consumers[subject] = consumerName
+	b.consumersMu.Unlock()
+
+	b.logger.Info("created/updated durable consumer",
+		"stream", streamName, "consumer", consumerName, "subject", subject)
+
+	return nil
+}
+
+// CreateOutboundConsumer creates a durable consumer for outbound HTTP processing
+// and returns the stream and consumer names needed by the OutboundClient.
+func (b *NATSBroker) CreateOutboundConsumer(subject string) (string, string, error) {
+	streamName, consumerName, err := b.createConsumer(subject, "outbound-")
+	if err != nil {
+		return "", "", err
+	}
+
+	b.logger.Info("created outbound consumer",
+		"stream", streamName, "consumer", consumerName, "subject", subject)
+
+	return streamName, consumerName, nil
+}
+
+func (b *NATSBroker) createConsumer(subject, namePrefix string) (string, string, error) {
 	streamName, err := b.streamResolver.FindStreamForSubject(subject)
 	if err != nil {
 		if !errors.Is(err, ErrNoStreamFound) {
-			return fmt.Errorf("cannot create consumer for subject '%s': %w", subject, err)
+			return "", "", fmt.Errorf("cannot create consumer for subject '%s': %w", subject, err)
 		}
-		// Stream not found — it may have been created after startup. Refresh and retry.
-		b.logger.Info("stream not found for subject, refreshing stream list",
-			"subject", subject)
+		b.logger.Info("stream not found for subject, refreshing stream list", "subject", subject)
 		if refreshErr := b.streamResolver.Refresh(b.ctx); refreshErr != nil {
-			b.logger.Error("failed to refresh stream list", "error", refreshErr)
-			return fmt.Errorf("cannot create consumer for subject '%s': %w", subject, err)
+			return "", "", fmt.Errorf("cannot create consumer for subject '%s': %w", subject, err)
 		}
 		streamName, err = b.streamResolver.FindStreamForSubject(subject)
 		if err != nil {
-			return fmt.Errorf("cannot create consumer for subject '%s' (after stream refresh): %w", subject, err)
+			return "", "", fmt.Errorf("cannot create consumer for subject '%s' (after stream refresh): %w", subject, err)
 		}
 	}
 
-	// Generate a valid consumer name
-	consumerName := b.GenerateConsumerName(subject)
+	consumerName := b.GenerateConsumerName(namePrefix + subject)
 
-	// Map deliver policy from config string to JetStream constant
 	deliverPolicy, err := b.parseDeliverPolicy(b.config.NATS.Consumers.DeliverPolicy)
 	if err != nil {
-		return fmt.Errorf("invalid deliver policy: %w", err)
+		return "", "", fmt.Errorf("invalid deliver policy: %w", err)
 	}
-
-	// Map replay policy from config string to JetStream constant
 	replayPolicy, err := b.parseReplayPolicy(b.config.NATS.Consumers.ReplayPolicy)
 	if err != nil {
-		return fmt.Errorf("invalid replay policy: %w", err)
+		return "", "", fmt.Errorf("invalid replay policy: %w", err)
 	}
 
-	// Create consumer configuration
-	consumerConfig := jetstream.ConsumerConfig{
+	ctx, cancel := context.WithTimeout(b.ctx, kvOperationTimeout)
+	defer cancel()
+
+	_, err = b.jetStream.CreateOrUpdateConsumer(ctx, streamName, jetstream.ConsumerConfig{
 		Durable:       consumerName,
 		FilterSubject: subject,
 		AckPolicy:     jetstream.AckExplicitPolicy,
@@ -187,39 +205,13 @@ func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
 		MaxAckPending: b.config.NATS.Consumers.MaxAckPending,
 		DeliverPolicy: deliverPolicy,
 		ReplayPolicy:  replayPolicy,
-	}
-
-	// Use CreateOrUpdateConsumer for idempotent behavior
-	ctx, cancel := context.WithTimeout(b.ctx, kvOperationTimeout)
-	defer cancel()
-
-	consumer, err := b.jetStream.CreateOrUpdateConsumer(ctx, streamName, consumerConfig)
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create consumer '%s' on stream '%s' for subject '%s': %w",
-			consumerName, streamName, subject, err)
+		return "", "", fmt.Errorf("failed to create consumer '%s' on stream '%s': %w",
+			consumerName, streamName, err)
 	}
 
-	// Track the consumer
-	b.consumersMu.Lock()
-	b.consumers[subject] = consumerName
-	b.consumersMu.Unlock()
-
-	// Get consumer info for logging
-	info, _ := consumer.Info(ctx)
-	if info != nil {
-		b.logger.Info("created/updated durable consumer",
-			"stream", streamName,
-			"consumer", consumerName,
-			"subject", subject,
-			"pending", info.NumPending,
-			"ackWait", info.Config.AckWait,
-			"maxDeliver", info.Config.MaxDeliver,
-			"maxAckPending", info.Config.MaxAckPending,
-			"deliverPolicy", b.config.NATS.Consumers.DeliverPolicy,
-			"replayPolicy", b.config.NATS.Consumers.ReplayPolicy)
-	}
-
-	return nil
+	return streamName, consumerName, nil
 }
 
 // parseDeliverPolicy converts config string to JetStream DeliverPolicy constant
