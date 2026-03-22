@@ -126,21 +126,18 @@ func (c *OutboundClient) GetSubscriptions() []*OutboundSubscription {
 }
 
 // AddSubscription adds a NATS subscription for outbound HTTP.
-// It accepts a context for cancellation and timeout control.
-func (c *OutboundClient) AddSubscription(ctx context.Context, streamName, consumerName, subject string, workers int) error {
-	// Use a timeout context for JetStream operations to prevent indefinite blocking
+func (c *OutboundClient) AddSubscription(ctx context.Context, streamName, consumerName, subject string, workers int) (*OutboundSubscription, error) {
 	opCtx, cancel := context.WithTimeout(ctx, clientOperationTimeout)
 	defer cancel()
 
-	// Perform network calls OUTSIDE the lock to avoid blocking other goroutines
 	stream, err := c.jetstream.Stream(opCtx, streamName)
 	if err != nil {
-		return fmt.Errorf("failed to get stream '%s': %w", streamName, err)
+		return nil, fmt.Errorf("failed to get stream '%s': %w", streamName, err)
 	}
 
 	consumer, err := stream.Consumer(opCtx, consumerName)
 	if err != nil {
-		return fmt.Errorf("failed to get consumer '%s': %w", consumerName, err)
+		return nil, fmt.Errorf("failed to get consumer '%s': %w", consumerName, err)
 	}
 
 	sub := &OutboundSubscription{
@@ -152,7 +149,6 @@ func (c *OutboundClient) AddSubscription(ctx context.Context, streamName, consum
 		logger:       c.logger,
 	}
 
-	// Only hold the lock for the actual slice append
 	c.mu.Lock()
 	c.subscriptions = append(c.subscriptions, sub)
 	c.mu.Unlock()
@@ -163,7 +159,42 @@ func (c *OutboundClient) AddSubscription(ctx context.Context, streamName, consum
 		"subject", subject,
 		"workers", workers)
 
+	return sub, nil
+}
+
+// AddOutboundSubscription implements broker.OutboundSubscriber.
+func (c *OutboundClient) AddOutboundSubscription(ctx context.Context, streamName, consumerName, subject string) error {
+	sub, err := c.AddSubscription(ctx, streamName, consumerName, subject, c.consumerCfg.WorkerCount)
+	if err != nil {
+		return err
+	}
+
+	if err := c.startSubscription(ctx, sub); err != nil {
+		return fmt.Errorf("failed to start outbound subscription for '%s': %w", subject, err)
+	}
+
 	return nil
+}
+
+// RemoveOutboundSubscription implements broker.OutboundSubscriber.
+// Stops the consumer iterator and workers, removes the subscription.
+func (c *OutboundClient) RemoveOutboundSubscription(subject string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i, sub := range c.subscriptions {
+		if sub.Subject == subject {
+			if sub.iterator != nil {
+				sub.iterator.Stop()
+			}
+			if sub.cancel != nil {
+				sub.cancel()
+			}
+			c.subscriptions = append(c.subscriptions[:i], c.subscriptions[i+1:]...)
+			c.logger.Info("outbound subscription removed", "subject", subject)
+			return
+		}
+	}
 }
 
 // Start begins consuming messages and making HTTP requests
