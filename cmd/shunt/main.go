@@ -37,6 +37,7 @@ func run() error {
 		kong.DefaultEnvars("SHUNT"),
 		kong.Vars{"version": version},
 	)
+	cli.Globals.Version = version
 	return ctx.Run(&cli.Globals)
 }
 

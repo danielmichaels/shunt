@@ -4,6 +4,7 @@ import (
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/app"
 	"github.com/danielmichaels/shunt/internal/broker"
+	"github.com/danielmichaels/shunt/internal/buildinfo"
 	"github.com/danielmichaels/shunt/internal/lifecycle"
 	"github.com/danielmichaels/shunt/internal/logger"
 )
@@ -33,7 +34,7 @@ func (s *ServeCmd) toOverrides() config.ServeOverrides {
 	}
 }
 
-func (s *ServeCmd) Run(_ *Globals) error {
+func (s *ServeCmd) Run(globals *Globals) error {
 	cfg, err := config.Load(s.Config)
 	if err != nil {
 		return err
@@ -44,6 +45,13 @@ func (s *ServeCmd) Run(_ *Globals) error {
 	if err != nil {
 		return err
 	}
+
+	bi := buildinfo.Get(globals.Version)
+	appLogger.Info("starting shunt",
+		"version", bi.Version,
+		"commit", bi.Commit,
+		"buildTime", bi.Time,
+		"modified", bi.Modified)
 
 	createApp := func() (lifecycle.Application, error) {
 		baseApp, err := app.NewAppBuilder(cfg).
