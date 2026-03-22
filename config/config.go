@@ -47,7 +47,9 @@ const (
 
 const (
 	DefaultConsumerPrefix    = "shunt"
-	DefaultPublishMode       = "jetstream"
+	PublishModeJetStream     = "jetstream"
+	PublishModeCore          = "core"
+	DefaultPublishMode       = PublishModeJetStream
 	DefaultDeliverPolicy     = "new"
 	DefaultReplayPolicy      = "instant"
 	DefaultLogLevel          = "info"

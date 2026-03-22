@@ -132,6 +132,20 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 		}
 	}
 
+	if err := m.broker.RefreshStreams(); err != nil {
+		m.logger.Warn("failed to refresh stream list before validating rules",
+			"key", key, "error", err)
+	}
+
+	resolver := m.broker.GetStreamResolver()
+	if streamErrs := resolver.ValidateRulesHaveStreams(rules); len(streamErrs) > 0 {
+		for _, e := range streamErrs {
+			m.logger.Error("stream validation failed, rejecting all rules for this key",
+				"key", key, "revision", revision, "error", e)
+		}
+		return
+	}
+
 	m.mu.Lock()
 
 	previousSubjects := m.collectNATSSubjects(m.currentRules[key])
@@ -141,13 +155,6 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 	newSubjects := m.collectNATSSubjects(rules)
 
 	m.mu.Unlock()
-
-	// Proactively refresh the stream list before creating consumers.
-	// Streams may have been created since the last discovery or rule update.
-	if err := m.broker.RefreshStreams(); err != nil {
-		m.logger.Warn("failed to refresh stream list before creating subscriptions",
-			"key", key, "error", err)
-	}
 
 	for subject := range newSubjects {
 		if !previousSubjects[subject] {

@@ -8,6 +8,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/rule"
 )
 
 // newTestResolver creates a StreamResolver for testing without JetStream dependency
@@ -426,6 +427,171 @@ func TestValidateSubjects(t *testing.T) {
 			}
 			if !tt.wantErr && err != nil {
 				t.Errorf("ValidateSubjects() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateRulesHaveStreams(t *testing.T) {
+	sensorsStream := []StreamInfo{
+		{Name: "SENSORS", Subjects: []string{"sensors.>"}, Storage: jetstream.MemoryStorage},
+		{Name: "EVENTS", Subjects: []string{"events.>"}, Storage: jetstream.MemoryStorage},
+		{Name: "ALERTS", Subjects: []string{"alerts.>"}, Storage: jetstream.MemoryStorage},
+	}
+
+	tests := []struct {
+		name      string
+		streams   []StreamInfo
+		rules     []rule.Rule
+		wantCount int
+	}{
+		{
+			name:    "NATS trigger with matching stream passes",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "valid-trigger",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "sensors.temperature"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "alerts.high-temp"}},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name:    "NATS trigger with no matching stream errors",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "bad-trigger",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "unknown.subject"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "alerts.notify"}},
+				},
+			},
+			wantCount: 1,
+		},
+		{
+			name:    "explicit jetstream action with no matching stream errors",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "bad-action",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "sensors.temperature"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "unknown.output", Mode: "jetstream"}},
+				},
+			},
+			wantCount: 1,
+		},
+		{
+			name:    "explicit core action with no matching stream passes",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "core-action",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "sensors.temperature"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "unknown.output", Mode: "core"}},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name:    "empty mode action with no matching stream passes (ambiguous)",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "default-action",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "sensors.temperature"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "unknown.output", Mode: ""}},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name:    "HTTP-only rule passes (no trigger subject)",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "http-rule",
+					Trigger: rule.Trigger{HTTP: &rule.HTTPTrigger{Path: "/webhooks/github", Method: "POST"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "github.events"}},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name:    "HTTP rule with explicit jetstream action and no matching stream errors",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "http-bad-action",
+					Trigger: rule.Trigger{HTTP: &rule.HTTPTrigger{Path: "/webhooks/github"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "unknown.output", Mode: "jetstream"}},
+				},
+			},
+			wantCount: 1,
+		},
+		{
+			name:    "multiple rules with mixed validity collects all errors",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "good-rule",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "sensors.temperature"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "alerts.high-temp"}},
+				},
+				{
+					Name:    "bad-trigger-rule",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "missing.subject"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "alerts.notify"}},
+				},
+				{
+					Name:    "bad-action-rule",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "sensors.humidity"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "missing.output", Mode: "jetstream"}},
+				},
+			},
+			wantCount: 2,
+		},
+		{
+			name:    "same rule with bad trigger AND bad jetstream action reports both",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "double-bad",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "missing.trigger"}},
+					Action:  rule.Action{NATS: &rule.NATSAction{Subject: "missing.action", Mode: "jetstream"}},
+				},
+			},
+			wantCount: 2,
+		},
+		{
+			name:    "rule with HTTP action (no NATS action) passes",
+			streams: sensorsStream,
+			rules: []rule.Rule{
+				{
+					Name:    "http-action-rule",
+					Trigger: rule.Trigger{NATS: &rule.NATSTrigger{Subject: "sensors.temperature"}},
+					Action:  rule.Action{HTTP: &rule.HTTPAction{URL: "https://example.com", Method: "POST"}},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name:      "empty rules list passes",
+			streams:   sensorsStream,
+			rules:     []rule.Rule{},
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := newTestResolverWithStreams(tt.streams)
+
+			errs := sr.ValidateRulesHaveStreams(tt.rules)
+
+			if len(errs) != tt.wantCount {
+				t.Errorf("ValidateRulesHaveStreams() returned %d errors, want %d\nerrors: %v",
+					len(errs), tt.wantCount, errs)
 			}
 		})
 	}
