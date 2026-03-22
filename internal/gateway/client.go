@@ -153,7 +153,7 @@ func (c *OutboundClient) AddSubscription(ctx context.Context, streamName, consum
 	c.subscriptions = append(c.subscriptions, sub)
 	c.mu.Unlock()
 
-	c.logger.Info("outbound subscription added",
+	c.logger.Debug("outbound subscription added",
 		"stream", streamName,
 		"consumer", consumerName,
 		"subject", subject,
@@ -190,7 +190,7 @@ func (c *OutboundClient) RemoveOutboundSubscription(subject string) {
 				sub.cancel()
 			}
 			c.subscriptions = append(c.subscriptions[:i], c.subscriptions[i+1:]...)
-			c.logger.Info("outbound subscription removed", "subject", subject)
+			c.logger.Debug("outbound subscription removed", "subject", subject)
 			return
 		}
 	}
@@ -206,7 +206,7 @@ func (c *OutboundClient) Start(ctx context.Context) error {
 		return nil
 	}
 
-	c.logger.Info("starting outbound client with Messages() iterator",
+	c.logger.Debug("starting outbound client",
 		"subscriptions", len(c.subscriptions),
 		"fetchBatchSize", c.consumerCfg.FetchBatchSize,
 		"fetchTimeout", c.consumerCfg.FetchTimeout)
@@ -217,7 +217,7 @@ func (c *OutboundClient) Start(ctx context.Context) error {
 		}
 	}
 
-	c.logger.Info("all outbound subscriptions started successfully")
+	c.logger.Debug("all outbound subscriptions started")
 	return nil
 }
 
@@ -232,13 +232,6 @@ func (c *OutboundClient) startSubscription(ctx context.Context, sub *OutboundSub
 		heartbeatDuration = clientMinHeartbeatInterval
 	}
 
-	c.logger.Debug("creating Messages() iterator for outbound subscription",
-		"subject", sub.Subject,
-		"pullMaxMessages", c.consumerCfg.FetchBatchSize,
-		"pullExpiry", c.consumerCfg.FetchTimeout,
-		"heartbeat", heartbeatDuration)
-
-	// Create Messages() iterator - event-driven, no polling
 	iter, err := sub.Consumer.Messages(
 		jetstream.PullMaxMessages(c.consumerCfg.FetchBatchSize),
 		jetstream.PullExpiry(c.consumerCfg.FetchTimeout),
@@ -249,10 +242,9 @@ func (c *OutboundClient) startSubscription(ctx context.Context, sub *OutboundSub
 		return fmt.Errorf("failed to create Messages() iterator: %w", err)
 	}
 
-	// Store iterator for cleanup during shutdown
 	sub.iterator = iter
 
-	c.logger.Info("Messages() iterator created successfully for outbound subscription",
+	c.logger.Debug("outbound consumer iterator created",
 		"subject", sub.Subject,
 		"stream", sub.StreamName,
 		"consumer", sub.ConsumerName,
@@ -260,13 +252,12 @@ func (c *OutboundClient) startSubscription(ctx context.Context, sub *OutboundSub
 		"pullExpiry", c.consumerCfg.FetchTimeout,
 		"heartbeat", heartbeatDuration)
 
-	// Start worker pool - each worker calls iter.Next() in blocking loop
 	for i := 0; i < sub.Workers; i++ {
 		c.wg.Add(1)
 		go c.messageWorker(subCtx, sub, i)
 	}
 
-	c.logger.Info("outbound subscription started with worker pool",
+	c.logger.Debug("outbound subscription started with worker pool",
 		"subject", sub.Subject,
 		"workers", sub.Workers)
 
@@ -396,7 +387,7 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg, 
 		c.metrics.IncMessagesTotal("received")
 	}
 
-	log.Info("processing outbound message",
+	log.Debug("processing outbound message",
 		"subject", msg.Subject(),
 		"size", len(msg.Data()))
 
@@ -441,7 +432,7 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg, 
 	}
 
 	duration := time.Since(start)
-	log.Info("outbound message processed",
+	log.Debug("outbound message processed",
 		"subject", msg.Subject(),
 		"duration", duration,
 		"actionsExecuted", len(actions))
@@ -569,7 +560,7 @@ func (c *OutboundClient) makeHTTPRequest(ctx context.Context, action *rule.HTTPA
 
 	// Check status code (2xx = success)
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		c.logger.Info("HTTP request successful",
+		c.logger.Debug("HTTP request successful",
 			trace.LogKey, traceID,
 			"url", action.URL,
 			"method", action.Method,
@@ -599,9 +590,9 @@ func (c *OutboundClient) Stop() error {
 	// Step 1: Stop all iterators gracefully (drains pending messages)
 	for _, sub := range c.subscriptions {
 		if sub.iterator != nil {
-			c.logger.Debug("stopping Messages() iterator", "subject", sub.Subject)
+			c.logger.Debug("stopping outbound consumer iterator", "subject", sub.Subject)
 			sub.iterator.Stop()
-			c.logger.Debug("Messages() iterator stopped", "subject", sub.Subject)
+			c.logger.Debug("outbound consumer iterator stopped", "subject", sub.Subject)
 		}
 	}
 

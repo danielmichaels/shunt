@@ -137,7 +137,7 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 
 		newStreams = append(newStreams, streamInfo)
 
-		sr.logger.Info("stream discovered",
+		sr.logger.Debug("stream discovered",
 			"name", streamInfo.Name,
 			"storage", streamInfo.Storage,
 			"type", sr.getStreamType(streamInfo),
@@ -187,7 +187,7 @@ func (sr *StreamResolver) Discover(ctx context.Context) error {
 // Refresh re-discovers all JetStream streams, replacing the previous stream list.
 // This is used to pick up streams created after initial startup.
 func (sr *StreamResolver) Refresh(ctx context.Context) error {
-	sr.logger.Info("refreshing JetStream stream list")
+	sr.logger.Debug("refreshing JetStream stream list")
 
 	discoverCtx, cancel := context.WithTimeout(ctx, streamDiscoveryTimeout)
 	defer cancel()
@@ -242,7 +242,7 @@ func (sr *StreamResolver) Refresh(ctx context.Context) error {
 	sr.discovered = true
 	sr.mu.Unlock()
 
-	sr.logger.Info("stream refresh complete",
+	sr.logger.Debug("stream refresh complete",
 		"totalStreams", len(newStreams),
 		"streamNames", streamNames)
 
@@ -325,7 +325,7 @@ func (sr *StreamResolver) FindStreamForSubject(subject string) (string, error) {
 
 	// If only one stream matches, no need to sort.
 	if len(matches) == 1 {
-		sr.logger.Info("selected optimal stream for subject (only one match)",
+		sr.logger.Debug("selected optimal stream for subject (only one match)",
 			"subject", subject,
 			"selectedStream", matches[0].streamName,
 			"filter", matches[0].filter,
@@ -370,7 +370,7 @@ func (sr *StreamResolver) FindStreamForSubject(subject string) (string, error) {
 	bestMatch := matches[0]
 
 	// Log selection decision with reasoning
-	sr.logger.Info("selected optimal stream for subject",
+	sr.logger.Debug("selected optimal stream for subject",
 		"subject", subject,
 		"selectedStream", bestMatch.streamName,
 		"filter", bestMatch.filter,

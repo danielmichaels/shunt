@@ -146,8 +146,6 @@ func (b *AppBuilder) WithNATSBroker() *AppBuilder {
 		b.base.Logger.Info("initializing local KV cache", "buckets", b.cfg.KV.Buckets)
 		if err := b.base.Broker.InitializeKVCache(); err != nil {
 			b.base.Logger.Error("failed to initialize local KV cache, continuing with direct NATS KV access", "error", err)
-		} else {
-			b.base.Logger.Info("local KV cache initialized successfully")
 		}
 	}
 	return b

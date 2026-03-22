@@ -25,6 +25,7 @@ type RuleKVManager struct {
 	logger              *slog.Logger
 	currentRules        map[string][]rule.Rule
 	outboundSubscriber  OutboundSubscriber
+	outboundSet         bool
 	mu                  sync.Mutex
 	wg                  sync.WaitGroup
 	ready               chan struct{}
@@ -186,7 +187,7 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 		}
 	}
 
-	m.logger.Info("KV rules updated",
+	m.logger.Debug("KV rules updated",
 		"key", key, "ruleCount", len(rules), "revision", revision)
 }
 
@@ -264,6 +265,7 @@ func (m *RuleKVManager) WaitReady(ctx context.Context) error {
 func (m *RuleKVManager) SetOutboundSubscriber(sub OutboundSubscriber) {
 	m.mu.Lock()
 	m.outboundSubscriber = sub
+	m.outboundSet = true
 
 	var httpSubjects []string
 	for _, rules := range m.currentRules {
@@ -280,8 +282,16 @@ func (m *RuleKVManager) SetOutboundSubscriber(sub OutboundSubscriber) {
 
 func (m *RuleKVManager) doAddOutboundSubscription(sub OutboundSubscriber, subject string) {
 	if sub == nil {
-		m.logger.Warn("HTTP action rule has no outbound subscriber, skipping",
-			"subject", subject)
+		m.mu.Lock()
+		wasSet := m.outboundSet
+		m.mu.Unlock()
+		if wasSet {
+			m.logger.Warn("HTTP action rule has no outbound subscriber, skipping",
+				"subject", subject)
+		} else {
+			m.logger.Debug("HTTP action rule deferred until outbound subscriber set",
+				"subject", subject)
+		}
 		return
 	}
 

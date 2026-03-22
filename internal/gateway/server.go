@@ -197,7 +197,7 @@ func (s *InboundServer) startWorkers(ctx context.Context) {
 					return
 				case job, ok := <-s.workQueue:
 					if !ok {
-						s.logger.Info("inbound worker stopped", "workerID", workerID)
+						s.logger.Debug("inbound worker stopped", "workerID", workerID)
 						return
 					}
 					s.processWebhookWithRecovery(workerID, job)
@@ -242,7 +242,7 @@ func (s *InboundServer) webhookHandler(path string) http.HandlerFunc {
 			traceID = trace.NewID()
 		}
 
-		s.logger.Info("webhook received",
+		s.logger.Debug("webhook received",
 			trace.LogKey, traceID,
 			"path", r.URL.Path,
 			"method", r.Method,
@@ -360,7 +360,7 @@ func (s *InboundServer) processWebhook(path, method string, body []byte, headers
 					s.metrics.IncActionsTotal("error", action.RuleName)
 				}
 			} else {
-				log.Info("published to NATS",
+				log.Debug("published to NATS",
 					"path", path,
 					"subject", action.NATS.Subject,
 					"rule_name", action.RuleName)
