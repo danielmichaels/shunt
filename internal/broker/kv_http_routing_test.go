@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,42 @@ import (
 	"github.com/danielmichaels/shunt/internal/rule"
 )
 
+type mockOutboundSubscriber struct {
+	mu       sync.Mutex
+	added    map[string]bool
+	removed  map[string]bool
+	addErr   error
+}
+
+func newMockOutboundSubscriber() *mockOutboundSubscriber {
+	return &mockOutboundSubscriber{
+		added:   make(map[string]bool),
+		removed: make(map[string]bool),
+	}
+}
+
+func (m *mockOutboundSubscriber) AddOutboundSubscription(_ context.Context, _, _, subject string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.addErr != nil {
+		return m.addErr
+	}
+	m.added[subject] = true
+	return nil
+}
+
+func (m *mockOutboundSubscriber) RemoveOutboundSubscription(subject string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removed[subject] = true
+}
+
+func (m *mockOutboundSubscriber) hasSubject(subject string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.added[subject]
+}
+
 const testHTTPRuleYAML = `
 - name: test-http-rule
   trigger:
@@ -23,6 +60,18 @@ const testHTTPRuleYAML = `
     nats:
       subject: events.test
       payload: '{"received": true}'
+`
+
+const testHTTPActionRuleYAML = `
+- name: test-http-action-rule
+  trigger:
+    nats:
+      subject: sensors.>
+  action:
+    http:
+      url: "https://webhook.example.com/notify"
+      method: POST
+      passthrough: true
 `
 
 const testNATSRuleYAML = `
@@ -236,4 +285,129 @@ func TestNATSRuleFromKV_RejectedWhenNoStream(t *testing.T) {
 	actions, err := processor.ProcessForSubscription("sensors.>", "sensors.tank.001", []byte(`{"level":42}`), nil)
 	require.NoError(t, err)
 	assert.Empty(t, actions, "rule with no matching stream should be rejected and not loaded")
+}
+
+// TestHTTPActionRule_RegistersWithOutboundSubscriber verifies that a rule
+// with NATS trigger + HTTP action registers with the outbound subscriber.
+func TestHTTPActionRule_RegistersWithOutboundSubscriber(t *testing.T) {
+	_, js, cleanup := setupNATS(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	log := logger.NewNopLogger()
+
+	_, err := js.CreateStream(ctx, jetstream.StreamConfig{
+		Name:     "SENSORS",
+		Subjects: []string{"sensors.>"},
+	})
+	require.NoError(t, err)
+
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "rules"})
+	require.NoError(t, err)
+
+	_, err = kv.Put(ctx, "http-action-rules", []byte(testHTTPActionRuleYAML))
+	require.NoError(t, err)
+
+	processor := rule.NewProcessor(log, nil, nil, nil)
+	natsBroker := newMinimalBroker(t, js)
+	rulesLoader := rule.NewRulesLoader(log, nil)
+	outbound := newMockOutboundSubscriber()
+
+	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+	kvManager.SetOutboundSubscriber(outbound)
+
+	require.NoError(t, kvManager.Watch(ctx))
+
+	readyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, kvManager.WaitReady(readyCtx))
+
+	assert.Eventually(t, func() bool {
+		return outbound.hasSubject("sensors.>")
+	}, 3*time.Second, 50*time.Millisecond, "HTTP action rule should register trigger subject with outbound subscriber")
+}
+
+// TestNATSOnlyRule_DoesNotRegisterWithOutboundSubscriber verifies that
+// a NATS-action-only rule does not register with the outbound subscriber.
+func TestNATSOnlyRule_DoesNotRegisterWithOutboundSubscriber(t *testing.T) {
+	_, js, cleanup := setupNATS(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	log := logger.NewNopLogger()
+
+	_, err := js.CreateStream(ctx, jetstream.StreamConfig{
+		Name:     "SENSORS",
+		Subjects: []string{"sensors.>"},
+	})
+	require.NoError(t, err)
+
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "rules"})
+	require.NoError(t, err)
+
+	_, err = kv.Put(ctx, "nats-rules", []byte(testNATSRuleYAML))
+	require.NoError(t, err)
+
+	processor := rule.NewProcessor(log, nil, nil, nil)
+	natsBroker := newMinimalBroker(t, js)
+	rulesLoader := rule.NewRulesLoader(log, nil)
+	outbound := newMockOutboundSubscriber()
+
+	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+	kvManager.SetOutboundSubscriber(outbound)
+
+	require.NoError(t, kvManager.Watch(ctx))
+
+	readyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, kvManager.WaitReady(readyCtx))
+
+	// Give some time for processing
+	time.Sleep(200 * time.Millisecond)
+
+	assert.False(t, outbound.hasSubject("sensors.>"),
+		"NATS-only rule should NOT register with outbound subscriber")
+}
+
+// TestSetOutboundSubscriber_RetroactiveRegistration verifies that setting
+// the outbound subscriber after rules are already loaded registers existing
+// HTTP action rules retroactively.
+func TestSetOutboundSubscriber_RetroactiveRegistration(t *testing.T) {
+	_, js, cleanup := setupNATS(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	log := logger.NewNopLogger()
+
+	_, err := js.CreateStream(ctx, jetstream.StreamConfig{
+		Name:     "SENSORS",
+		Subjects: []string{"sensors.>"},
+	})
+	require.NoError(t, err)
+
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "rules"})
+	require.NoError(t, err)
+
+	_, err = kv.Put(ctx, "http-action-rules", []byte(testHTTPActionRuleYAML))
+	require.NoError(t, err)
+
+	processor := rule.NewProcessor(log, nil, nil, nil)
+	natsBroker := newMinimalBroker(t, js)
+	rulesLoader := rule.NewRulesLoader(log, nil)
+
+	// Start KV manager WITHOUT outbound subscriber (simulates startup order)
+	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+
+	require.NoError(t, kvManager.Watch(ctx))
+
+	readyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, kvManager.WaitReady(readyCtx))
+
+	// Now set outbound subscriber (simulates startGateway after KV sync)
+	outbound := newMockOutboundSubscriber()
+	kvManager.SetOutboundSubscriber(outbound)
+
+	assert.True(t, outbound.hasSubject("sensors.>"),
+		"setting outbound subscriber should retroactively register existing HTTP action rules")
 }

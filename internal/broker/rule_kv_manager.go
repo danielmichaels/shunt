@@ -11,21 +11,29 @@ import (
 	"log/slog"
 )
 
+// OutboundSubscriber manages JetStream consumers for rules with HTTP actions.
+// Implemented by gateway.OutboundClient.
+type OutboundSubscriber interface {
+	AddOutboundSubscription(ctx context.Context, streamName, consumerName, subject string) error
+	RemoveOutboundSubscription(subject string)
+}
+
 type RuleKVManager struct {
-	kvBucket      string
-	autoProvision bool
-	processor     *rule.Processor
-	broker        *NATSBroker
-	rulesLoader   *rule.RulesLoader
-	logger        *slog.Logger
-	currentRules  map[string][]rule.Rule
-	mu            sync.Mutex
-	wg            sync.WaitGroup
-	ready         chan struct{}
-	readyOnce     sync.Once
-	watcher       jetstream.KeyWatcher
-	watchOnce     sync.Once
-	watchErr      error
+	kvBucket            string
+	autoProvision       bool
+	processor           *rule.Processor
+	broker              *NATSBroker
+	rulesLoader         *rule.RulesLoader
+	logger              *slog.Logger
+	currentRules        map[string][]rule.Rule
+	outboundSubscriber  OutboundSubscriber
+	mu                  sync.Mutex
+	wg                  sync.WaitGroup
+	ready               chan struct{}
+	readyOnce           sync.Once
+	watcher             jetstream.KeyWatcher
+	watchOnce           sync.Once
+	watchErr            error
 }
 
 func NewRuleKVManager(
@@ -148,16 +156,18 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 
 	m.mu.Lock()
 
-	previousSubjects := m.collectNATSSubjects(m.currentRules[key])
+	previousNATSSubjects := m.collectNATSSubjects(m.currentRules[key])
+	previousHTTPSubjects := m.collectHTTPActionSubjects(m.currentRules[key])
 	m.currentRules[key] = rules
 	m.pushRulesToProcessor()
 
-	newSubjects := m.collectNATSSubjects(rules)
+	newNATSSubjects := m.collectNATSSubjects(rules)
+	newHTTPSubjects := m.collectHTTPActionSubjects(rules)
 
 	m.mu.Unlock()
 
-	for subject := range newSubjects {
-		if !previousSubjects[subject] {
+	for subject := range newNATSSubjects {
+		if !previousNATSSubjects[subject] {
 			if err := m.broker.AddAndStartSubscription(subject); err != nil {
 				if errors.Is(err, ErrNoStreamFound) {
 					m.logger.Warn("rule references subject with no JetStream stream, skipping subscription",
@@ -168,6 +178,12 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 						"key", key, "subject", subject, "error", err)
 				}
 			}
+		}
+	}
+
+	for subject := range newHTTPSubjects {
+		if !previousHTTPSubjects[subject] {
+			m.addOutboundSubscription(m.broker.ctx, subject)
 		}
 	}
 
@@ -184,22 +200,33 @@ func (m *RuleKVManager) handleRuleDelete(key string) {
 		return
 	}
 
-	oldSubjects := m.collectNATSSubjects(oldRules)
+	oldNATSSubjects := m.collectNATSSubjects(oldRules)
+	oldHTTPSubjects := m.collectHTTPActionSubjects(oldRules)
 	delete(m.currentRules, key)
 	m.pushRulesToProcessor()
 
-	stillNeeded := make(map[string]bool)
+	stillNeededNATS := make(map[string]bool)
+	stillNeededHTTP := make(map[string]bool)
 	for _, rules := range m.currentRules {
 		for subject := range m.collectNATSSubjects(rules) {
-			stillNeeded[subject] = true
+			stillNeededNATS[subject] = true
+		}
+		for subject := range m.collectHTTPActionSubjects(rules) {
+			stillNeededHTTP[subject] = true
 		}
 	}
 
 	m.mu.Unlock()
 
-	for subject := range oldSubjects {
-		if !stillNeeded[subject] {
+	for subject := range oldNATSSubjects {
+		if !stillNeededNATS[subject] {
 			m.broker.RemoveSubscription(subject)
+		}
+	}
+
+	for subject := range oldHTTPSubjects {
+		if !stillNeededHTTP[subject] {
+			m.removeOutboundSubscription(subject)
 		}
 	}
 
@@ -233,10 +260,67 @@ func (m *RuleKVManager) WaitReady(ctx context.Context) error {
 	}
 }
 
+// SetOutboundSubscriber assigns the outbound subscriber for HTTP action rules.
+// If rules with HTTP actions are already loaded, it retroactively registers them.
+func (m *RuleKVManager) SetOutboundSubscriber(sub OutboundSubscriber) {
+	m.mu.Lock()
+	m.outboundSubscriber = sub
+
+	var httpSubjects []string
+	for _, rules := range m.currentRules {
+		for subject := range m.collectHTTPActionSubjects(rules) {
+			httpSubjects = append(httpSubjects, subject)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, subject := range httpSubjects {
+		m.addOutboundSubscription(m.broker.ctx, subject)
+	}
+}
+
+func (m *RuleKVManager) addOutboundSubscription(ctx context.Context, subject string) {
+	if m.outboundSubscriber == nil {
+		m.logger.Warn("HTTP action rule has no outbound subscriber, skipping",
+			"subject", subject)
+		return
+	}
+
+	streamName, err := m.broker.FindStreamForSubject(subject)
+	if err != nil {
+		m.logger.Error("failed to find stream for outbound subscription",
+			"subject", subject, "error", err)
+		return
+	}
+
+	consumerName := m.broker.GenerateConsumerName("outbound-" + subject)
+	if err := m.outboundSubscriber.AddOutboundSubscription(ctx, streamName, consumerName, subject); err != nil {
+		m.logger.Error("failed to add outbound subscription",
+			"subject", subject, "error", err)
+	}
+}
+
+func (m *RuleKVManager) removeOutboundSubscription(subject string) {
+	if m.outboundSubscriber == nil {
+		return
+	}
+	m.outboundSubscriber.RemoveOutboundSubscription(subject)
+}
+
 func (m *RuleKVManager) collectNATSSubjects(rules []rule.Rule) map[string]bool {
 	subjects := make(map[string]bool)
 	for _, r := range rules {
 		if r.Trigger.NATS != nil {
+			subjects[r.Trigger.NATS.Subject] = true
+		}
+	}
+	return subjects
+}
+
+func (m *RuleKVManager) collectHTTPActionSubjects(rules []rule.Rule) map[string]bool {
+	subjects := make(map[string]bool)
+	for _, r := range rules {
+		if r.Trigger.NATS != nil && r.Action.HTTP != nil {
 			subjects[r.Trigger.NATS.Subject] = true
 		}
 	}

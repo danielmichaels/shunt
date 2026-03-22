@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/stretchr/testify/require"
 
+	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/logger"
 )
 
@@ -62,7 +63,9 @@ func newMinimalBroker(t *testing.T, js jetstream.JetStream) *NATSBroker {
 	log := logger.NewNopLogger()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	cfg, _ := config.Load("")
 	return &NATSBroker{
+		config:         cfg,
 		logger:         log,
 		jetStream:      js,
 		kvStores:       make(map[string]jetstream.KeyValue),
