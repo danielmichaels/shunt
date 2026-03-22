@@ -187,7 +187,7 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 		}
 	}
 
-	m.logger.Debug("KV rules updated",
+	m.logger.Info("KV rules updated",
 		"key", key, "ruleCount", len(rules), "revision", revision)
 }
 
