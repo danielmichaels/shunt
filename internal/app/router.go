@@ -151,16 +151,16 @@ func (app *RouterApp) startGateway(ctx context.Context) error {
 		&app.config.HTTP.Client,
 	)
 
+	if app.ruleKVManager != nil {
+		app.ruleKVManager.SetOutboundSubscriber(app.outboundClient)
+	}
+
 	if err := app.inboundServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start inbound server: %w", err)
 	}
 
 	if err := app.outboundClient.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start outbound client: %w", err)
-	}
-
-	if app.ruleKVManager != nil {
-		app.ruleKVManager.SetOutboundSubscriber(app.outboundClient)
 	}
 
 	app.logger.Info("gateway started", "httpAddress", app.config.HTTP.Server.Address)

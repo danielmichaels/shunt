@@ -151,8 +151,15 @@ security:
 # HTTP Gateway Configuration
 gateway:
   enabled: true              # Enable HTTP gateway subsystem (default: false)
-                              # When enabled, starts inbound HTTP server and outbound HTTP client
-                              # Uses the http.server and http.client config sections below
+                             # When enabled, starts inbound HTTP server and outbound HTTP client
+                             # Uses the http.server and http.client config sections below
+  outbound:                   
+    workers: 8
+    fetchBatchSize: 64
+    fetchTimeout: 5s
+    maxAckPending: 1000
+    ackWaitTimeout: 30s
+    maxDeliver: 5
 
 # HTTP Server and Client Configuration (used by gateway)
 http:

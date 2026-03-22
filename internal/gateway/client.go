@@ -177,7 +177,6 @@ func (c *OutboundClient) AddOutboundSubscription(ctx context.Context, streamName
 }
 
 // RemoveOutboundSubscription implements broker.OutboundSubscriber.
-// Stops the consumer iterator and workers, removes the subscription.
 func (c *OutboundClient) RemoveOutboundSubscription(subject string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -334,7 +333,7 @@ func (c *OutboundClient) messageWorker(ctx context.Context, sub *OutboundSubscri
 
 // processMessageWithRecovery wraps message processing with panic recovery and error handling
 // This ensures a single malformed message cannot crash the entire worker
-func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jetstream.Msg, subject string, workerID int) {
+func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jetstream.Msg, triggerSubject string, workerID int) {
 	traceID := trace.FromNATSHeaders(msg.Headers())
 
 	defer func() {
@@ -342,15 +341,14 @@ func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jet
 			c.logger.Error("panic recovered in outbound message worker",
 				trace.LogKey, traceID,
 				"panic", r,
-				"subject", subject,
+				"subject", msg.Subject(),
 				"workerID", workerID,
 				"stack", string(debug.Stack()))
 
-			// Terminate poison message to prevent redelivery loop
 			if termErr := msg.Term(); termErr != nil {
 				c.logger.Error("failed to terminate message after panic",
 					trace.LogKey, traceID,
-					"subject", subject,
+					"subject", msg.Subject(),
 					"error", termErr)
 			}
 
@@ -360,17 +358,16 @@ func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jet
 		}
 	}()
 
-	// Process the message
-	if err := c.processMessage(ctx, msg, traceID); err != nil {
+	if err := c.processMessage(ctx, msg, triggerSubject, traceID); err != nil {
 		c.logger.Error("failed to process outbound message",
-			"subject", subject,
+			trace.LogKey, traceID,
+			"subject", msg.Subject(),
 			"workerID", workerID,
 			"error", err)
 
-		// NAK on failure (will retry up to maxDeliver)
 		if nakErr := msg.Nak(); nakErr != nil {
 			c.logger.Error("failed to NAK message",
-				"subject", subject,
+				"subject", msg.Subject(),
 				"error", nakErr)
 		}
 
@@ -378,10 +375,9 @@ func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jet
 			c.metrics.IncMessagesTotal("error")
 		}
 	} else {
-		// ACK on success
 		if ackErr := msg.Ack(); ackErr != nil {
 			c.logger.Error("failed to ACK message",
-				"subject", subject,
+				"subject", msg.Subject(),
 				"error", ackErr)
 		}
 
@@ -392,7 +388,7 @@ func (c *OutboundClient) processMessageWithRecovery(ctx context.Context, msg jet
 }
 
 // processMessage processes a NATS message and makes HTTP requests
-func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg, traceID string) error {
+func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg, triggerSubject, traceID string) error {
 	start := time.Now()
 	log := c.logger.With(trace.LogKey, traceID)
 
@@ -404,7 +400,6 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg, 
 		"subject", msg.Subject(),
 		"size", len(msg.Data()))
 
-	// Extract headers
 	headers := make(map[string]string)
 	if msg.Headers() != nil {
 		for key, values := range msg.Headers() {
@@ -414,8 +409,7 @@ func (c *OutboundClient) processMessage(ctx context.Context, msg jetstream.Msg, 
 		}
 	}
 
-	// Process through rule engine
-	actions, err := c.processor.ProcessNATS(msg.Subject(), msg.Data(), headers)
+	actions, err := c.processor.ProcessForSubscription(triggerSubject, msg.Subject(), msg.Data(), headers)
 	if err != nil {
 		return fmt.Errorf("rule processing failed: %w", err)
 	}
