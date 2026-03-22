@@ -25,7 +25,7 @@ tmp_dir = "tmp"
   rerun = false
   rerun_delay = 500
   send_interrupt = false
-  stop_on_error = false
+  stop_on_error = true
 
 [color]
   app = ""
@@ -36,12 +36,12 @@ tmp_dir = "tmp"
 
 [log]
   main_only = false
-  silent = true
+  silent = false
   time = false
 
 [misc]
   clean_on_exit = false
-  quiet = true
+  quiet = false
 
 [proxy]
   app_port = 0
