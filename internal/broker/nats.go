@@ -163,7 +163,7 @@ func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
 	}
 
 	// Generate a valid consumer name
-	consumerName := b.generateConsumerName(subject)
+	consumerName := b.GenerateConsumerName(subject)
 
 	// Map deliver policy from config string to JetStream constant
 	deliverPolicy, err := b.parseDeliverPolicy(b.config.NATS.Consumers.DeliverPolicy)
@@ -325,8 +325,8 @@ func (b *NATSBroker) RemoveSubscription(subject string) {
 	b.logger.Info("subscription and consumer tracking removed", "subject", subject)
 }
 
-// generateConsumerName creates a valid NATS consumer name from a subject
-func (b *NATSBroker) generateConsumerName(subject string) string {
+// GenerateConsumerName creates a valid NATS consumer name from a subject
+func (b *NATSBroker) GenerateConsumerName(subject string) string {
 	sanitized := subject
 	sanitized = strings.ReplaceAll(sanitized, ".", "-")
 	sanitized = strings.ReplaceAll(sanitized, "*", "wildcard")
@@ -685,7 +685,7 @@ func (b *NATSBroker) GetConsumerName(subject string) string {
 	if exists {
 		return name
 	}
-	return b.generateConsumerName(subject)
+	return b.GenerateConsumerName(subject)
 }
 
 // Close shuts down the broker connections

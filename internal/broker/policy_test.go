@@ -167,7 +167,7 @@ func TestGenerateConsumerName(t *testing.T) {
 				},
 			}
 
-			got := broker.generateConsumerName(tt.subject)
+			got := broker.GenerateConsumerName(tt.subject)
 			if got != tt.want {
 				t.Errorf("generateConsumerName(%q) with prefix %q = %q, want %q",
 					tt.subject, tt.prefix, got, tt.want)
