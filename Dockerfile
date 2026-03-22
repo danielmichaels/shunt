@@ -1,6 +1,7 @@
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 ARG TARGETARCH
+ARG VERSION=dev
 
 WORKDIR /src
 
@@ -10,7 +11,7 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o /shunt ./cmd/shunt
+    go build -ldflags="-s -w -X main.version=${VERSION}" -o /shunt ./cmd/shunt
 
 FROM gcr.io/distroless/static-debian12:nonroot
 

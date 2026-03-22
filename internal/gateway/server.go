@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"log/slog"
 
+	"github.com/danielmichaels/shunt/internal/buildinfo"
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
 	"github.com/danielmichaels/shunt/internal/rule"
@@ -137,12 +139,12 @@ func (s *InboundServer) Start(ctx context.Context) error {
 		s.webhookHandler(r.URL.Path)(w, r)
 	})
 
-	// Health check endpoints (registered after "/" so ServeMux prefers them)
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/healthz", s.healthHandler)
+	mux.HandleFunc("/version", s.versionHandler)
 
 	handler := logger.RequestLogger(s.logger, logger.HTTPLoggerConfig{
-		SkipPaths: []string{"/health", "/healthz"},
+		SkipPaths: []string{"/health", "/healthz", "/version"},
 		Concise:   true,
 	})(mux)
 
@@ -433,4 +435,11 @@ func (s *InboundServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(responseHealthy))
+}
+
+func (s *InboundServer) versionHandler(w http.ResponseWriter, r *http.Request) {
+	info := buildinfo.Get("")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(info)
 }
