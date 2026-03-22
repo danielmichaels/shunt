@@ -189,7 +189,7 @@ func (p *Processor) ReplaceHTTPRules(rules map[string][]*Rule) {
 	for _, rs := range rules {
 		total += len(rs)
 	}
-	p.logger.Info("KV HTTP rules replaced", "paths", len(rules), "totalRules", total)
+	p.logger.Debug("KV HTTP rules replaced", "paths", len(rules), "totalRules", total)
 }
 
 // ProcessNATS processes a NATS message through the rule engine
@@ -846,7 +846,7 @@ func (p *Processor) ReplaceRules(rules map[string][]*Rule) {
 	for _, rs := range rules {
 		total += len(rs)
 	}
-	p.logger.Info("KV rules replaced",
+	p.logger.Debug("KV rules replaced",
 		"subjects", len(rules),
 		"totalRules", total)
 

@@ -136,7 +136,7 @@ func (sm *SubscriptionManager) AddSubscription(ctx context.Context, streamName, 
 	sm.subscriptions[subject] = sub
 	sm.mu.Unlock()
 
-	sm.logger.Info("subscription added",
+	sm.logger.Debug("subscription added",
 		"stream", streamName,
 		"consumer", consumerName,
 		"subject", subject,
@@ -187,7 +187,7 @@ func (sm *SubscriptionManager) RemoveSubscription(subject string) {
 		sub.cancel()
 	}
 
-	sm.logger.Info("subscription removed", "subject", subject)
+	sm.logger.Debug("subscription removed", "subject", subject)
 }
 
 // Start begins consuming messages from all subscriptions using Messages() iterator.
@@ -199,7 +199,7 @@ func (sm *SubscriptionManager) Start(ctx context.Context) error {
 		return fmt.Errorf("no subscriptions configured")
 	}
 
-	sm.logger.Info("starting subscription manager with Messages() iterator pattern",
+	sm.logger.Debug("starting subscription manager",
 		"subscriptions", len(sm.subscriptions),
 		"fetchBatchSize", sm.consumerCfg.FetchBatchSize,
 		"fetchTimeout", sm.consumerCfg.FetchTimeout)
@@ -226,14 +226,6 @@ func (sm *SubscriptionManager) startSubscription(ctx context.Context, sub *Subsc
 		heartbeatDuration = minHeartbeatInterval
 	}
 
-	sm.logger.Debug("creating Messages() iterator",
-		"subject", sub.Subject,
-		"pullMaxMessages", sm.consumerCfg.FetchBatchSize,
-		"pullExpiry", sm.consumerCfg.FetchTimeout,
-		"heartbeat", heartbeatDuration)
-
-	// Create Messages() iterator with JetStream optimizations
-	// This establishes a persistent pull subscription with internal pre-buffering
 	iter, err := sub.Consumer.Messages(
 		jetstream.PullMaxMessages(sm.consumerCfg.FetchBatchSize),
 		jetstream.PullExpiry(sm.consumerCfg.FetchTimeout),
@@ -244,10 +236,9 @@ func (sm *SubscriptionManager) startSubscription(ctx context.Context, sub *Subsc
 		return fmt.Errorf("failed to create Messages() iterator: %w", err)
 	}
 
-	// Store iterator for cleanup during shutdown
 	sub.iterator = iter
 
-	sm.logger.Info("Messages() iterator created successfully",
+	sm.logger.Debug("consumer iterator created",
 		"subject", sub.Subject,
 		"stream", sub.StreamName,
 		"consumer", sub.ConsumerName,
@@ -255,14 +246,12 @@ func (sm *SubscriptionManager) startSubscription(ctx context.Context, sub *Subsc
 		"pullExpiry", sm.consumerCfg.FetchTimeout,
 		"heartbeat", heartbeatDuration)
 
-	// Start worker pool - each worker calls iter.Next() in a blocking loop
-	// This creates a work queue pattern where multiple workers compete for messages
 	for i := 0; i < sub.Workers; i++ {
 		sm.wg.Add(1)
 		go sm.messageWorker(subCtx, sub, i)
 	}
 
-	sm.logger.Info("subscription started with worker pool",
+	sm.logger.Debug("subscription started with worker pool",
 		"subject", sub.Subject,
 		"workers", sub.Workers)
 
@@ -616,9 +605,9 @@ func (sm *SubscriptionManager) Stop() error {
 
 	for _, sub := range sm.subscriptions {
 		if sub.iterator != nil {
-			sm.logger.Debug("stopping Messages() iterator", "subject", sub.Subject)
+			sm.logger.Debug("stopping consumer iterator", "subject", sub.Subject)
 			sub.iterator.Stop()
-			sm.logger.Debug("Messages() iterator stopped", "subject", sub.Subject)
+			sm.logger.Debug("consumer iterator stopped", "subject", sub.Subject)
 		}
 	}
 

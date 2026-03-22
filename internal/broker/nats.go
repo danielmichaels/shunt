@@ -146,7 +146,7 @@ func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
 	b.consumers[subject] = consumerName
 	b.consumersMu.Unlock()
 
-	b.logger.Info("created/updated durable consumer",
+	b.logger.Debug("created/updated durable consumer",
 		"stream", streamName, "consumer", consumerName, "subject", subject)
 
 	return nil
@@ -160,7 +160,7 @@ func (b *NATSBroker) CreateOutboundConsumer(subject string) (string, string, err
 		return "", "", err
 	}
 
-	b.logger.Info("created outbound consumer",
+	b.logger.Debug("created outbound consumer",
 		"stream", streamName, "consumer", consumerName, "subject", subject)
 
 	return streamName, consumerName, nil

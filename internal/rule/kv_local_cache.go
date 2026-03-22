@@ -29,7 +29,6 @@ func NewLocalKVCache(logger *slog.Logger) *LocalKVCache {
 		enabled: true,
 	}
 
-	logger.Info("local KV cache initialized", "enabled", cache.enabled)
 	return cache
 }
 
