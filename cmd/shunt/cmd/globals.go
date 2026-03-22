@@ -1,3 +1,5 @@
 package cmd
 
-type Globals struct{}
+type Globals struct {
+	Debug bool `help:"Enable debug output" env:"SHUNT_DEBUG"`
+}

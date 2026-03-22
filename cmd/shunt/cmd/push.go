@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/danielmichaels/shunt/internal/broker"
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/rule"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 type KVPushCmd struct {
 	Path string `arg:"" help:"File or directory to push" type:"existingpath"`
 }
 
-func (p *KVPushCmd) Run(kv *KVCmd) error {
+func (p *KVPushCmd) Run(kv *KVCmd, globals *Globals) error {
 	nc, bucket, err := kv.connectToNATS()
 	if err != nil {
 		return err
@@ -51,6 +54,24 @@ func (p *KVPushCmd) Run(kv *KVCmd) error {
 	ctx, cancel := context.WithTimeout(context.Background(), kvOperationTimeout)
 	defer cancel()
 
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return fmt.Errorf("failed to create JetStream context: %w", err)
+	}
+
+	resolver := broker.NewStreamResolver(js, log)
+	if err := resolver.Discover(ctx); err != nil {
+		return fmt.Errorf("failed to discover streams: %w", err)
+	}
+
+	if globals.Debug {
+		streams := resolver.GetStreams()
+		fmt.Fprintf(os.Stderr, "discovered %d streams:\n", len(streams))
+		for _, s := range streams {
+			fmt.Fprintf(os.Stderr, "  %s subjects=%v\n", s.Name, s.Subjects)
+		}
+	}
+
 	pushed := 0
 	for _, f := range files {
 		data, err := os.ReadFile(f)
@@ -67,6 +88,14 @@ func (p *KVPushCmd) Run(kv *KVCmd) error {
 			if err := loader.ValidateRule(&rules[i]); err != nil {
 				return fmt.Errorf("validation failed for rule %d in %s: %w", i, f, err)
 			}
+		}
+
+		if streamErrs := resolver.ValidateRulesHaveStreams(rules); len(streamErrs) > 0 {
+			msgs := make([]string, len(streamErrs))
+			for i, e := range streamErrs {
+				msgs[i] = e.Error()
+			}
+			return fmt.Errorf("stream validation failed for %s:\n  %s", f, strings.Join(msgs, "\n  "))
 		}
 
 		key := deriveKVKey(f, kv.Bucket)

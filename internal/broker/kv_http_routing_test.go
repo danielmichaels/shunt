@@ -159,13 +159,19 @@ func TestHTTPRuleFromKV_UpdatedOnKVChange(t *testing.T) {
 	assert.Empty(t, actions, "old path should not match after rule update")
 }
 
-// TestNATSRuleFromKV_StillRoutesAfterRefactor ensures NATS routing is unaffected.
+// TestNATSRuleFromKV_StillRoutesAfterRefactor ensures NATS routing works when stream exists.
 func TestNATSRuleFromKV_StillRoutesAfterRefactor(t *testing.T) {
 	_, js, cleanup := setupNATS(t)
 	defer cleanup()
 
 	ctx := context.Background()
 	log := logger.NewNopLogger()
+
+	_, err := js.CreateStream(ctx, jetstream.StreamConfig{
+		Name:     "SENSORS",
+		Subjects: []string{"sensors.>"},
+	})
+	require.NoError(t, err)
 
 	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "rules"})
 	require.NoError(t, err)
@@ -190,4 +196,44 @@ func TestNATSRuleFromKV_StillRoutesAfterRefactor(t *testing.T) {
 	if len(actions) > 0 {
 		assert.Equal(t, "test-nats-rule", actions[0].RuleName)
 	}
+}
+
+// TestNATSRuleFromKV_RejectedWhenNoStream verifies rules are rejected when
+// trigger subject has no matching stream.
+func TestNATSRuleFromKV_RejectedWhenNoStream(t *testing.T) {
+	_, js, cleanup := setupNATS(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	log := logger.NewNopLogger()
+
+	// Create a stream that does NOT cover sensors.>
+	_, err := js.CreateStream(ctx, jetstream.StreamConfig{
+		Name:     "EVENTS",
+		Subjects: []string{"events.>"},
+	})
+	require.NoError(t, err)
+
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "rules"})
+	require.NoError(t, err)
+
+	// Push a rule with trigger subject "sensors.>" — no stream covers it
+	_, err = kv.Put(ctx, "nats-rules", []byte(testNATSRuleYAML))
+	require.NoError(t, err)
+
+	processor := rule.NewProcessor(log, nil, nil, nil)
+	natsBroker := newMinimalBroker(t, js)
+	rulesLoader := rule.NewRulesLoader(log, nil)
+
+	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+	require.NoError(t, kvManager.Watch(ctx))
+
+	readyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, kvManager.WaitReady(readyCtx))
+
+	// Rule should NOT be loaded — stream validation should have rejected it
+	actions, err := processor.ProcessForSubscription("sensors.>", "sensors.tank.001", []byte(`{"level":42}`), nil)
+	require.NoError(t, err)
+	assert.Empty(t, actions, "rule with no matching stream should be rejected and not loaded")
 }

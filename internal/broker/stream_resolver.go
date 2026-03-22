@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/danielmichaels/shunt/config"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/nats-io/nats.go/jetstream"
 	"log/slog"
 )
@@ -682,6 +684,47 @@ func (sr *StreamResolver) ValidateSubjects(subjects []string) error {
 
 	sr.logger.Info("all subjects successfully mapped to streams", "subjectCount", len(subjects))
 	return nil
+}
+
+// ValidateRulesHaveStreams validates that rules reference subjects covered by
+// existing JetStream streams. Returns a slice of errors — one per missing mapping.
+func (sr *StreamResolver) ValidateRulesHaveStreams(rules []rule.Rule) []error {
+	sr.mu.RLock()
+	discovered := sr.discovered
+	sr.mu.RUnlock()
+
+	if !discovered {
+		return []error{fmt.Errorf("streams not discovered — call Discover() first")}
+	}
+
+	type check struct {
+		label   string
+		subject string
+	}
+
+	var errs []error
+
+	for _, r := range rules {
+		ruleName := r.RuleName()
+		var checks []check
+
+		if r.Trigger.NATS != nil {
+			checks = append(checks, check{"trigger", r.Trigger.NATS.Subject})
+		}
+		if r.Action.NATS != nil && r.Action.NATS.Mode == config.PublishModeJetStream {
+			checks = append(checks, check{"action", r.Action.NATS.Subject})
+		}
+
+		for _, c := range checks {
+			if _, err := sr.FindStreamForSubject(c.subject); err != nil {
+				errs = append(errs, fmt.Errorf(
+					"no stream found for %s subject %q in rule %q — create a stream with a matching subject filter before pushing this rule",
+					c.label, c.subject, ruleName))
+			}
+		}
+	}
+
+	return errs
 }
 
 // Helper methods for logging and statistics
