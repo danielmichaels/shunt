@@ -43,13 +43,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Generate image tag
+        id: tag
+        run: echo "tag=$(date +%s)-$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=${{ steps.tag.outputs.tag }}
             type=raw,value=latest
-            type=sha,prefix=
 
       - uses: docker/build-push-action@v6
         with:
