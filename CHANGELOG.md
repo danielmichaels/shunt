@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.0] - 2026-03-24
+
+### 🐛 Bug Fixes
+
+- Use explicit git-cliff ranges to handle rc tags in changelog (#25)([4c4f8bf](https://github.com/danielmichaels/shunt/commit/4c4f8bf3ef5d64a53e297dff23c7a14a83d09e03))
+
+### 📦 Other
+
+- Add git cliff ci (#26)([be6eb7c](https://github.com/danielmichaels/shunt/commit/be6eb7c43dd561243171ba4e75f3ba7b2fa38962))
 ## [0.0.3] - 2026-03-22
 
 ### 🐛 Bug Fixes
