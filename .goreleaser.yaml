@@ -4,6 +4,7 @@ before:
   hooks:
     - go mod tidy
     - go vet ./...
+    - sh -c 'PREV=$(git tag -l "v*" --sort=-v:refname | grep -v "\-" | grep -v "^{{ .Tag }}$" | head -1) && if [ -n "$PREV" ]; then git cliff "$PREV..{{ .Tag }}" --strip header -o /tmp/goreleaser-changelog.md; else git cliff --strip header -o /tmp/goreleaser-changelog.md; fi'
 
 builds:
   - main: ./cmd/shunt
@@ -29,13 +30,7 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
-      - "^chore:"
+  disable: true
 
 dockers:
   - use: buildx
