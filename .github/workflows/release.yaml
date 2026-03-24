@@ -31,6 +31,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install git-cliff
+        uses: kenji-miyake/setup-git-cliff@v2
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
