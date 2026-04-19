@@ -94,7 +94,7 @@ tasks:
   changelog:
     desc: "Generate full changelog"
     cmds:
-      - git cliff -o CHANGELOG.md 
+      - git cliff -o CHANGELOG.md
     sources:
       - .git/refs/tags/*
 

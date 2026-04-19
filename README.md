@@ -40,7 +40,7 @@ Rules can be managed in a separate Git repository and deployed via CI/CD — see
 
 ### Prerequisites
 
-*   Go 1.23+ (for building from source)
+*   Go 1.24+ (for building from source)
 *   A running NATS Server with JetStream enabled
 
 ### 1. Build
