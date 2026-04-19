@@ -465,6 +465,14 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("publish mode must be 'jetstream' or 'core', got: %s", cfg.NATS.Publish.Mode)
 	}
 
+	if cfg.NATS.Publish.MaxRetries < 1 {
+		return fmt.Errorf("publish maxRetries must be at least 1")
+	}
+
+	if cfg.NATS.Publish.RetryBaseDelay <= 0 {
+		return fmt.Errorf("publish retryBaseDelay must be positive")
+	}
+
 	validLogLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	if !validLogLevels[cfg.Logging.Level] {
 		return fmt.Errorf("invalid log level: %s", cfg.Logging.Level)
