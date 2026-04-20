@@ -231,6 +231,10 @@ type ServeOverrides struct {
 	WorkerCount    *int
 }
 
+// NewDefaults returns a Config populated with all default values.
+// Useful for programmatic config construction (e.g. dev/test commands).
+func NewDefaults() *Config { return newDefaults() }
+
 func newDefaults() *Config {
 	return &Config{
 		NATS: NATSConfig{
