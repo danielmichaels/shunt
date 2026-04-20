@@ -2,8 +2,12 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +46,14 @@ var devStreamSubjects = []string{
 	"notifications.>",
 	"orders.>",
 	"reports.>",
+	"demo.>",
 }
+
+const (
+	// devDemoReceiverURLVar is used in local-capture.yaml rule file
+	devDemoReceiverURLVar = "SHUNT_DEV_DEMO_RECEIVER_URL"
+	devDemoReceiverPath   = "/shunt-demo"
+)
 
 // devDefaultRules are seeded on startup when --all-rules is not set.
 var devDefaultRules = []string{
@@ -54,19 +65,35 @@ var devDefaultRules = []string{
 // DevCmd starts an embedded NATS server alongside shunt for local development.
 // No external NATS installation or Docker required.
 type DevCmd struct {
-	NATSPort int    `help:"Embedded NATS server port" default:"14222"`
-	HTTPAddr string `help:"HTTP gateway listen address" default:":7080"`
-	RulesDir string `help:"Directory of rule YAML files to seed into KV on startup" default:"./rules"`
-	LogLevel string `help:"Log level" default:"debug" enum:"debug,info,warn,error"`
-	AllRules bool   `help:"Seed all rule files from RulesDir instead of only the defaults" default:"false"`
+	NATSPort         int    `help:"Embedded NATS server port" default:"14222"`
+	HTTPAddr         string `help:"HTTP gateway listen address" default:":7080"`
+	RulesDir         string `help:"Directory of rule YAML files to seed into KV on startup" default:"./rules"`
+	LogLevel         string `help:"Log level" default:"debug" enum:"debug,info,warn,error"`
+	AllRules         bool   `help:"Seed all rule files from RulesDir instead of only the defaults" default:"false"`
+	DemoReceiver     bool   `help:"Start built-in local HTTP receiver for the NATS -> HTTP demo" default:"true" env:"SHUNT_DEV_DEMO_RECEIVER"`
+	DemoReceiverAddr string `help:"Built-in demo receiver listen address" default:"127.0.0.1:18080" env:"SHUNT_DEV_DEMO_RECEIVER_ADDR"`
 }
 
 func (d *DevCmd) Run(globals *Globals) error {
 	natsURL := fmt.Sprintf("nats://localhost:%d", d.NATSPort)
+	demoReceiverURL := devDemoReceiverURL(d.DemoReceiverAddr)
+	defaultRules := append([]string(nil), devDefaultRules...)
+	if d.DemoReceiver {
+		defaultRules = append(defaultRules, "http/local-capture.yaml", "http/demo-chain.yaml")
+	}
+
+	if err := os.Setenv(devDemoReceiverURLVar, demoReceiverURL); err != nil {
+		return fmt.Errorf("set %s: %w", devDemoReceiverURLVar, err)
+	}
 
 	fmt.Fprintf(os.Stderr, "\n  shunt dev\n\n")
 	fmt.Fprintf(os.Stderr, "  embedded NATS  %s\n", natsURL)
 	fmt.Fprintf(os.Stderr, "  HTTP gateway   http://localhost%s\n", d.HTTPAddr)
+	if d.DemoReceiver {
+		fmt.Fprintf(os.Stderr, "  demo receiver  %s\n", demoReceiverURL)
+	} else {
+		fmt.Fprintf(os.Stderr, "  demo receiver  disabled\n")
+	}
 	fmt.Fprintf(os.Stderr, "  rules dir      %s\n\n", d.RulesDir)
 
 	bootLog := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -81,7 +108,7 @@ func (d *DevCmd) Run(globals *Globals) error {
 		ns.WaitForShutdown()
 	}()
 
-	if err := seedNATS(natsURL, d.RulesDir, d.AllRules, bootLog); err != nil {
+	if err := seedNATS(natsURL, d.RulesDir, d.AllRules, defaultRules, bootLog); err != nil {
 		return fmt.Errorf("seed: %w", err)
 	}
 
@@ -92,13 +119,29 @@ func (d *DevCmd) Run(globals *Globals) error {
 		return err
 	}
 
+	if d.DemoReceiver {
+		demoReceiver, err := startDevDemoReceiver(d.DemoReceiverAddr, appLogger)
+		if err != nil {
+			return fmt.Errorf("start demo receiver: %w (disable with --demo-receiver=false)", err)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := demoReceiver.Shutdown(shutdownCtx); err != nil {
+				appLogger.Warn("failed to stop demo receiver", "error", err)
+			}
+		}()
+	}
+
 	bi := buildinfo.Get(globals.Version)
 	appLogger.Info("starting shunt dev",
 		"version", bi.Version,
 		"nats", natsURL,
-		"gateway", d.HTTPAddr)
+		"gateway", d.HTTPAddr,
+		"demoReceiverEnabled", d.DemoReceiver,
+		"demoReceiverURL", demoReceiverURL)
 
-	printCheatsheet(d.HTTPAddr, d.NATSPort)
+	printCheatsheet(d.HTTPAddr, d.NATSPort, d.DemoReceiver, demoReceiverURL)
 
 	createApp := func() (lifecycle.Application, error) {
 		baseApp, err := app.NewAppBuilder(cfg).
@@ -168,7 +211,7 @@ func startEmbeddedNATS(port int, log *slog.Logger) (*natsserver.Server, error) {
 }
 
 // seedNATS creates the DEV JetStream stream and loads rules from dir into the rules KV bucket.
-func seedNATS(natsURL, rulesDir string, allRules bool, log *slog.Logger) error {
+func seedNATS(natsURL, rulesDir string, allRules bool, defaultRules []string, log *slog.Logger) error {
 	nc, err := nats.Connect(natsURL,
 		nats.MaxReconnects(5),
 		nats.ReconnectWait(200*time.Millisecond),
@@ -208,7 +251,7 @@ func seedNATS(natsURL, rulesDir string, allRules bool, log *slog.Logger) error {
 			log.Warn("rule seeding incomplete", "dir", rulesDir, "error", err)
 		}
 	} else {
-		if err := loadDefaultRules(ctx, kv, rulesDir, log); err != nil {
+		if err := loadDefaultRules(ctx, kv, rulesDir, defaultRules, log); err != nil {
 			log.Warn("default rule seeding incomplete", "error", err)
 		}
 	}
@@ -216,9 +259,9 @@ func seedNATS(natsURL, rulesDir string, allRules bool, log *slog.Logger) error {
 	return nil
 }
 
-func loadDefaultRules(ctx context.Context, kv jetstream.KeyValue, rulesDir string, log *slog.Logger) error {
+func loadDefaultRules(ctx context.Context, kv jetstream.KeyValue, rulesDir string, defaultRules []string, log *slog.Logger) error {
 	count := 0
-	for _, rel := range devDefaultRules {
+	for _, rel := range defaultRules {
 		path := filepath.Join(rulesDir, rel)
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -335,25 +378,128 @@ func buildDevConfig(natsURL, httpAddr, logLevel string) *config.Config {
 	return cfg
 }
 
-func printCheatsheet(httpAddr string, natsPort int) {
+func devDemoReceiverURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	return "http://" + addr + devDemoReceiverPath
+}
+
+func startDevDemoReceiver(addr string, log *slog.Logger) (*http.Server, error) {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(devDemoReceiverPath, func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
+		if err != nil {
+			log.Error("demo receiver failed to read body", "error", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		headers := make(map[string]string)
+		for key, values := range r.Header {
+			if len(values) > 0 {
+				headers[key] = values[0]
+			}
+		}
+
+		log.Info("demo receiver captured outbound HTTP request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"remoteAddr", r.RemoteAddr,
+			"headers", headers,
+			"body", string(body))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	server := &http.Server{
+		Handler:           mux,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("demo receiver stopped unexpectedly", "error", err)
+		}
+	}()
+
+	log.Info("demo receiver started", "url", devDemoReceiverURL(addr))
+	return server, nil
+}
+
+func printCheatsheet(httpAddr string, natsPort int, demoReceiverEnabled bool, demoReceiverURL string) {
 	host := "localhost"
 	if strings.HasPrefix(httpAddr, ":") {
 		httpAddr = host + httpAddr
 	}
 
-	fmt.Fprintf(os.Stderr, "\n  ── dev cheatsheet ──────────────────────────────────────────\n\n")
-	fmt.Fprintf(os.Stderr, "  NATS publish (trigger router rules):\n")
-	fmt.Fprintf(os.Stderr, "    nats -s nats://localhost:%d pub sensors.data '{\"sensor\":{\"id\":\"t1\",\"reading\":35,\"location\":\"bedroom\"}}'\n", natsPort)
-	fmt.Fprintf(os.Stderr, "    nats -s nats://localhost:%d pub building.floor1.hvac.status '{\"status\":\"alert\",\"message\":\"overheat\",\"priority\":1}'\n", natsPort)
-	fmt.Fprintf(os.Stderr, "    nats -s nats://localhost:%d pub events.deploy '{\"severity\":\"critical\",\"description\":\"deploy failed\",\"affected_systems\":[\"api\"],\"region\":\"us-east\"}'\n", natsPort)
-	fmt.Fprintf(os.Stderr, "\n  HTTP webhook (trigger http rules):\n")
-	fmt.Fprintf(os.Stderr, "    curl -s -X POST http://%s/webhooks/github/pr \\\n", httpAddr)
-	fmt.Fprintf(os.Stderr, "      -H 'Content-Type: application/json' \\\n")
-	fmt.Fprintf(os.Stderr, "      -H 'X-GitHub-Event: pull_request' \\\n")
-	fmt.Fprintf(os.Stderr, "      -d '{\"action\":\"opened\",\"number\":42,\"user\":{\"login\":\"alice\"},\"pull_request\":{\"title\":\"feat\",\"html_url\":\"http://example.com\"},\"repository\":{\"name\":\"shunt\"}}'\n")
-	fmt.Fprintf(os.Stderr, "    curl -s -X POST http://%s/webhooks/generic -H 'Content-Type: application/json' -d '{\"data\":{\"hello\":\"world\"}}'\n", httpAddr)
-	fmt.Fprintf(os.Stderr, "\n  Subscribe to routed messages:\n")
-	fmt.Fprintf(os.Stderr, "    nats -s nats://localhost:%d sub 'alerts.>'\n", natsPort)
-	fmt.Fprintf(os.Stderr, "    nats -s nats://localhost:%d sub '>'\n", natsPort)
-	fmt.Fprintf(os.Stderr, "\n  ────────────────────────────────────────────────────────────\n\n")
+	const rule = "  ──────────────────────────────────────────────────────────────────"
+	w := os.Stderr
+	section := func(title string) {
+		fmt.Fprintf(w, "\n%s\n   %s\n%s\n\n", rule, title, rule)
+	}
+
+	fmt.Fprintf(w, "\n  ══════════════════════════════════════════════════════════════════\n")
+	fmt.Fprintf(w, "   shunt dev cheatsheet\n")
+	fmt.Fprintf(w, "  ══════════════════════════════════════════════════════════════════\n")
+
+	section("1. Publish to NATS (trigger router rules)")
+	fmt.Fprintf(w, "     nats -s nats://localhost:%d pub sensors.data \\\n", natsPort)
+	fmt.Fprintf(w, "       '{\"sensor\":{\"id\":\"t1\",\"reading\":35,\"location\":\"bedroom\"}}'\n\n")
+	fmt.Fprintf(w, "     nats -s nats://localhost:%d pub building.floor1.hvac.status \\\n", natsPort)
+	fmt.Fprintf(w, "       '{\"status\":\"alert\",\"message\":\"overheat\",\"priority\":1}'\n\n")
+	fmt.Fprintf(w, "     nats -s nats://localhost:%d pub events.deploy \\\n", natsPort)
+	fmt.Fprintf(w, "       '{\"severity\":\"critical\",\"description\":\"deploy failed\",\"region\":\"us-east\"}'\n")
+
+	section("2. POST HTTP webhooks (trigger http rules)")
+	fmt.Fprintf(w, "     curl -s -X POST http://%s/webhooks/github/pr \\\n", httpAddr)
+	fmt.Fprintf(w, "       -H 'Content-Type: application/json' \\\n")
+	fmt.Fprintf(w, "       -H 'X-GitHub-Event: pull_request' \\\n")
+	fmt.Fprintf(w, "       -d '{\"action\":\"opened\",\"number\":42,\"user\":{\"login\":\"alice\"},\n")
+	fmt.Fprintf(w, "            \"pull_request\":{\"title\":\"feat\",\"html_url\":\"http://example.com\"},\n")
+	fmt.Fprintf(w, "            \"repository\":{\"name\":\"shunt\"}}'\n\n")
+	fmt.Fprintf(w, "     curl -s -X POST http://%s/webhooks/generic \\\n", httpAddr)
+	fmt.Fprintf(w, "       -H 'Content-Type: application/json' \\\n")
+	fmt.Fprintf(w, "       -d '{\"data\":{\"hello\":\"world\"}}'\n")
+
+	if demoReceiverEnabled {
+		section("3. Capture outbound HTTP (NATS → HTTP)")
+		fmt.Fprintf(w, "     receiver listening at %s\n\n", demoReceiverURL)
+		fmt.Fprintf(w, "     nats -s nats://localhost:%d pub notifications.demo \\\n", natsPort)
+		fmt.Fprintf(w, "       '{\"message\":\"hello from shunt\",\"severity\":\"info\"}'\n\n")
+		fmt.Fprintf(w, "     shunt POSTs to the receiver; request prints in this terminal.\n")
+
+		section("4. Two-hop chain (HTTP → NATS → HTTP)")
+		fmt.Fprintf(w, "     curl -s -X POST http://%s/webhooks/demo \\\n", httpAddr)
+		fmt.Fprintf(w, "       -H 'Content-Type: application/json' \\\n")
+		fmt.Fprintf(w, "       -d '{\"data\":{\"hello\":\"chain\"}}'\n\n")
+		fmt.Fprintf(w, "     rule 1: POST /webhooks/demo → publish NATS demo.trigger\n")
+		fmt.Fprintf(w, "     rule 2: NATS demo.trigger    → POST to receiver\n")
+	}
+
+	section("5. Subscribe to routed subjects")
+	fmt.Fprintf(w, "     nats -s nats://localhost:%d sub \\\n", natsPort)
+	fmt.Fprintf(w, "       'alerts.>'    'facilities.>' 'monitoring.>' 'escalation.>' \\\n")
+	fmt.Fprintf(w, "       'ops.>'       'critical.>'   'github.>'     'webhooks.>'   \\\n")
+	fmt.Fprintf(w, "       'payments.>'  'tenants.>'    'demo.>'\n\n")
+	fmt.Fprintf(w, "     avoid 'nats sub \">\"' — picks up JetStream $JS.> chatter too.\n")
+
+	fmt.Fprintf(w, "\n  ══════════════════════════════════════════════════════════════════\n\n")
 }

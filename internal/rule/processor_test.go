@@ -101,6 +101,60 @@ func setupTestProcessorWithKV(kvData map[string]map[string]interface{}) *Process
 // 3. Dynamic KV lookup using the nested message field
 // 4. Subject context injection in output (@subject.1)
 // 5. Timestamp context injection in output (@timestamp.iso)
+func TestProcessor_HeaderLookupIsCaseInsensitive(t *testing.T) {
+	processor := newTestProcessor()
+
+	rule := Rule{
+		Trigger: Trigger{
+			HTTP: &HTTPTrigger{Path: "/webhooks/github/pr", Method: "POST"},
+		},
+		Conditions: &Conditions{
+			Operator: "and",
+			Items: []Condition{
+				{
+					Field:    "{@header.X-GitHub-Event}",
+					Operator: "eq",
+					Value:    "pull_request",
+				},
+				{
+					Field:    "{action}",
+					Operator: "eq",
+					Value:    "opened",
+				},
+			},
+		},
+		Action: Action{
+			NATS: &NATSAction{
+				Subject: "github.pr.{repository.name}.opened",
+				Payload: `{"event":"pr_opened"}`,
+			},
+		},
+	}
+
+	if err := processor.LoadRules([]Rule{rule}); err != nil {
+		t.Fatalf("Failed to load rule: %v", err)
+	}
+
+	actions, err := processor.ProcessHTTP(
+		"/webhooks/github/pr",
+		"POST",
+		[]byte(`{"action":"opened","repository":{"name":"shunt"}}`),
+		map[string]string{"X-Github-Event": "pull_request"},
+	)
+	if err != nil {
+		t.Fatalf("ProcessHTTP failed: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(actions))
+	}
+	if actions[0].NATS == nil {
+		t.Fatalf("expected NATS action, got nil")
+	}
+	if got := actions[0].NATS.Subject; got != "github.pr.shunt.opened" {
+		t.Fatalf("unexpected subject: got %q", got)
+	}
+}
+
 func TestProcessor_ComplexIntegration_DeepContext(t *testing.T) {
 	// Setup KV Data
 	kvData := map[string]map[string]interface{}{
