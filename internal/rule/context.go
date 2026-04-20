@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -236,6 +237,17 @@ func (c *EvaluationContext) resolveSystemField(path string) (interface{}, bool) 
 		if c.Headers != nil {
 			if value, ok := c.Headers[headerName]; ok {
 				return value, true
+			}
+
+			canonicalName := http.CanonicalHeaderKey(headerName)
+			if value, ok := c.Headers[canonicalName]; ok {
+				return value, true
+			}
+
+			for key, value := range c.Headers {
+				if strings.EqualFold(key, headerName) {
+					return value, true
+				}
 			}
 		}
 		return nil, false
