@@ -19,9 +19,11 @@ import (
 
 	"log/slog"
 
+	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/buildinfo"
 	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/natsutil"
 	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/danielmichaels/shunt/internal/trace"
 )
@@ -58,10 +60,8 @@ type InboundServer struct {
 	logger     *slog.Logger
 	metrics    *metrics.Metrics
 	processor  *rule.Processor
-	jetstream  jetstream.JetStream
-	natsConn   *nats.Conn
 	httpServer *http.Server
-	publishCfg *PublishConfig
+	publisher  *natsutil.Publisher
 	serverCfg  *ServerConfig
 
 	// Worker pool components
@@ -88,43 +88,31 @@ type ServerConfig struct {
 	InboundQueueSize int
 }
 
-// PublishConfig contains NATS publish configuration
-type PublishConfig struct {
-	Mode           string // "jetstream" or "core"
-	AckTimeout     time.Duration
-	MaxRetries     int
-	RetryBaseDelay time.Duration
-}
-
 // NewInboundServer creates a new HTTP inbound server with a worker pool.
 func NewInboundServer(
-	logger *slog.Logger,
-	metrics *metrics.Metrics,
+	log *slog.Logger,
+	m *metrics.Metrics,
 	processor *rule.Processor,
 	js jetstream.JetStream,
 	nc *nats.Conn,
 	serverCfg *ServerConfig,
-	publishCfg *PublishConfig,
+	publishCfg *config.PublishConfig,
 ) *InboundServer {
-	// Grug brain: Use good defaults if not set.
 	if serverCfg.InboundWorkerCount <= 0 {
 		serverCfg.InboundWorkerCount = DefaultInboundWorkerCount
-		logger.Info("InboundWorkerCount not set, using default", "count", serverCfg.InboundWorkerCount)
+		log.Info("InboundWorkerCount not set, using default", "count", serverCfg.InboundWorkerCount)
 	}
 	if serverCfg.InboundQueueSize <= 0 {
 		serverCfg.InboundQueueSize = DefaultInboundQueueSize
-		logger.Info("InboundQueueSize not set, using default", "size", serverCfg.InboundQueueSize)
+		log.Info("InboundQueueSize not set, using default", "size", serverCfg.InboundQueueSize)
 	}
 
 	return &InboundServer{
-		logger:     logger,
-		metrics:    metrics,
-		processor:  processor,
-		jetstream:  js,
-		natsConn:   nc,
-		serverCfg:  serverCfg,
-		publishCfg: publishCfg,
-		// Initialize the buffered channel for the work queue.
+		logger:    log,
+		metrics:   m,
+		processor: processor,
+		serverCfg: serverCfg,
+		publisher: natsutil.NewPublisher(nc, js, publishCfg, m, log),
 		workQueue: make(chan webhookJob, serverCfg.InboundQueueSize),
 	}
 }
@@ -200,7 +188,7 @@ func (s *InboundServer) startWorkers(ctx context.Context) {
 						s.logger.Debug("inbound worker stopped", "workerID", workerID)
 						return
 					}
-					s.processWebhookWithRecovery(workerID, job)
+					s.processWebhookWithRecovery(ctx, workerID, job)
 				}
 			}
 		}()
@@ -310,7 +298,7 @@ func (s *InboundServer) webhookHandler(path string) http.HandlerFunc {
 	}
 }
 
-func (s *InboundServer) processWebhookWithRecovery(workerID int, job webhookJob) {
+func (s *InboundServer) processWebhookWithRecovery(ctx context.Context, workerID int, job webhookJob) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error("panic recovered in inbound worker",
@@ -327,29 +315,24 @@ func (s *InboundServer) processWebhookWithRecovery(workerID int, job webhookJob)
 		}
 	}()
 
-	s.processWebhook(job.path, job.method, job.body, job.headers, job.traceID)
+	s.processWebhook(ctx, job.path, job.method, job.body, job.headers, job.traceID)
 }
 
 // processWebhook processes the webhook and publishes to NATS
-func (s *InboundServer) processWebhook(path, method string, body []byte, headers map[string]string, traceID string) {
+func (s *InboundServer) processWebhook(ctx context.Context, path, method string, body []byte, headers map[string]string, traceID string) {
 	log := s.logger.With(trace.LogKey, traceID)
 
-	// Process through rule engine
 	actions, err := s.processor.ProcessHTTP(path, method, body, headers)
 	if err != nil {
-		log.Error("failed to process webhook",
-			"path", path,
-			"method", method,
-			"error", err)
+		log.Error("failed to process webhook", "path", path, "method", method, "error", err)
 		return
 	}
 
-	// Publish all matched actions to NATS
 	for _, action := range actions {
 		action.TraceID = traceID
 
 		if action.NATS != nil {
-			if err := s.publishToNATS(action.NATS, traceID); err != nil {
+			if err := s.publisher.PublishAction(ctx, action.NATS, action.RuleName, traceID); err != nil {
 				log.Error("failed to publish to NATS",
 					"path", path,
 					"method", method,
@@ -373,60 +356,6 @@ func (s *InboundServer) processWebhook(path, method string, body []byte, headers
 				"path", path,
 				"url", action.HTTP.URL)
 		}
-	}
-}
-
-// publishToNATS publishes a NATS action with retry logic
-func (s *InboundServer) publishToNATS(action *rule.NATSAction, traceID string) error {
-	// Prepare payload
-	var payloadBytes []byte
-	if action.Passthrough {
-		payloadBytes = action.RawPayload
-	} else {
-		payloadBytes = []byte(action.Payload)
-	}
-
-	// Create NATS message
-	msg := nats.NewMsg(action.Subject)
-	msg.Data = payloadBytes
-
-	// Add headers if present
-	if len(action.Headers) > 0 {
-		msg.Header = make(nats.Header)
-		for key, value := range action.Headers {
-			msg.Header.Set(key, value)
-		}
-	}
-
-	if traceID != "" {
-		if msg.Header == nil {
-			msg.Header = make(nats.Header)
-		}
-		msg.Header.Set(trace.NATSHeader, traceID)
-	}
-
-	// Publish based on mode
-	if s.publishCfg.Mode == "core" {
-		return s.natsConn.PublishMsg(msg)
-	}
-
-	// JetStream async publish
-	ctx, cancel := context.WithTimeout(context.Background(), s.publishCfg.AckTimeout)
-	defer cancel()
-
-	ackF, err := s.jetstream.PublishMsgAsync(msg)
-	if err != nil {
-		return fmt.Errorf("jetstream async publish failed: %w", err)
-	}
-
-	// Wait for ACK
-	select {
-	case <-ackF.Ok():
-		return nil
-	case err := <-ackF.Err():
-		return fmt.Errorf("jetstream publish failed: %w", err)
-	case <-ctx.Done():
-		return fmt.Errorf("publish timeout: %w", ctx.Err())
 	}
 }
 

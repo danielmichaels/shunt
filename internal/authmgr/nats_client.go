@@ -27,12 +27,13 @@ const (
 // NATSClient provides minimal NATS KV write functionality
 // No subscriptions, no consumers, no streams - just connect and write to KV bucket
 type NATSClient struct {
-	conn   *nats.Conn
-	js     jetstream.JetStream
-	kv     jetstream.KeyValue
-	logger *slog.Logger
-	config *NATSConfig
-	shared bool
+	conn      *nats.Conn
+	js        jetstream.JetStream
+	kv        jetstream.KeyValue
+	logger    *slog.Logger
+	config    *NATSConfig
+	keyPrefix string
+	shared    bool
 }
 
 // NewNATSClient creates a NATS client and opens KV bucket
@@ -87,11 +88,12 @@ func NewNATSClient(cfg *NATSConfig, storageConfig *StorageConfig, log *slog.Logg
 	log.Info("KV bucket opened successfully", "bucket", storageConfig.Bucket)
 
 	return &NATSClient{
-		conn:   nc,
-		js:     js,
-		kv:     kv,
-		logger: log,
-		config: cfg,
+		conn:      nc,
+		js:        js,
+		kv:        kv,
+		logger:    log,
+		config:    cfg,
+		keyPrefix: storageConfig.KeyPrefix,
 	}, nil
 }
 
@@ -125,24 +127,33 @@ func NewNATSClientFromConn(nc *nats.Conn, storageConfig *StorageConfig, log *slo
 	log.Info("KV bucket opened successfully (shared connection)", "bucket", storageConfig.Bucket)
 
 	return &NATSClient{
-		conn:   nc,
-		js:     js,
-		kv:     kv,
-		logger: log,
-		shared: true,
+		conn:      nc,
+		js:        js,
+		kv:        kv,
+		logger:    log,
+		keyPrefix: storageConfig.KeyPrefix,
+		shared:    true,
 	}, nil
 }
 
-// StoreToken writes a token to the KV bucket
-func (c *NATSClient) StoreToken(ctx context.Context, key, token string) error {
-	c.logger.Debug("storing token in KV", "key", key)
+func (c *NATSClient) keyWithPrefix(key string) string {
+	if c.keyPrefix == "" {
+		return key
+	}
+	return c.keyPrefix + key
+}
 
-	_, err := c.kv.Put(ctx, key, []byte(token))
+// StoreToken writes a token to the KV bucket, applying keyPrefix if configured.
+func (c *NATSClient) StoreToken(ctx context.Context, key, token string) error {
+	prefixedKey := c.keyWithPrefix(key)
+	c.logger.Debug("storing token in KV", "key", prefixedKey)
+
+	_, err := c.kv.Put(ctx, prefixedKey, []byte(token))
 	if err != nil {
 		return fmt.Errorf("failed to store token: %w", err)
 	}
 
-	c.logger.Debug("token stored successfully", "key", key)
+	c.logger.Debug("token stored successfully", "key", prefixedKey)
 	return nil
 }
 

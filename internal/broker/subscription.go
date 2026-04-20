@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/metrics"
+	"github.com/danielmichaels/shunt/internal/natsutil"
 	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/danielmichaels/shunt/internal/trace"
 	"github.com/nats-io/nats.go"
@@ -32,8 +32,6 @@ const (
 	// errorBackoffDelay is the delay after encountering errors to avoid tight retry loops
 	errorBackoffDelay = 100 * time.Millisecond
 
-	// maxRetryJitter is the maximum jitter added to retry delays to prevent thundering herd
-	maxRetryJitter = 25 * time.Millisecond
 )
 
 // Terminal error types - these errors indicate the message is permanently invalid
@@ -64,6 +62,7 @@ type SubscriptionManager struct {
 	processor     *rule.Processor
 	consumerCfg   *config.ConsumerConfig
 	publishCfg    *config.PublishConfig
+	publisher     *natsutil.Publisher
 	subscriptions map[string]*Subscription
 	wg            sync.WaitGroup
 	mu            sync.RWMutex
@@ -100,6 +99,7 @@ func NewSubscriptionManager(
 		processor:     processor,
 		consumerCfg:   consumerConfig,
 		publishCfg:    publishConfig,
+		publisher:     natsutil.NewPublisher(natsConn, js, publishConfig, metrics, logger),
 		subscriptions: make(map[string]*Subscription),
 	}
 }
@@ -449,153 +449,8 @@ func (sm *SubscriptionManager) processMessage(ctx context.Context, msg jetstream
 	return nil
 }
 
-// publishActionWithRetry publishes a NATS action with exponential backoff and jitter.
 func (sm *SubscriptionManager) publishActionWithRetry(ctx context.Context, action *rule.NATSAction, ruleName string, traceID string) error {
-	maxRetries := sm.publishCfg.MaxRetries
-	baseDelay := sm.publishCfg.RetryBaseDelay
-	publishMode := sm.publishCfg.Mode
-	if action.Mode != "" {
-		sm.logger.Debug("per-rule mode override active",
-			"subject", action.Subject,
-			"ruleMode", action.Mode,
-			"globalMode", sm.publishCfg.Mode)
-		publishMode = action.Mode
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if ctx.Err() != nil {
-			return fmt.Errorf("context cancelled: %w", ctx.Err())
-		}
-
-		var err error
-		switch publishMode {
-		case "core":
-			err = sm.publishCore(ctx, action, traceID)
-		case "jetstream":
-			err = sm.publishJetStream(ctx, action, traceID)
-		default:
-			sm.logger.Warn("unknown publish mode, falling back to jetstream", "mode", publishMode)
-			err = sm.publishJetStream(ctx, action, traceID)
-		}
-
-		if err == nil {
-			return nil
-		}
-
-		lastErr = err
-		sm.logger.Warn("action publish failed, will retry",
-			"attempt", attempt+1, "maxRetries", maxRetries, "subject", action.Subject, "error", err)
-		if sm.metrics != nil {
-			sm.metrics.IncActionPublishFailures(ruleName)
-		}
-
-		if attempt == maxRetries-1 {
-			break
-		}
-
-		// Exponential backoff with jitter
-		delay := baseDelay * time.Duration(1<<attempt)
-		jitter := time.Duration(rand.Intn(int(maxRetryJitter.Milliseconds()))) * time.Millisecond
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("context cancelled during retry backoff: %w", ctx.Err())
-		case <-time.After(delay + jitter):
-		}
-	}
-
-	return fmt.Errorf("failed to publish after %d attempts (mode: %s): %w", maxRetries, publishMode, lastErr)
-}
-
-// publishJetStream publishes to JetStream using the async model for high throughput.
-func (sm *SubscriptionManager) publishJetStream(ctx context.Context, action *rule.NATSAction, traceID string) error {
-	// Prepare payload
-	var payloadBytes []byte
-	if action.Passthrough {
-		payloadBytes = action.RawPayload
-	} else {
-		payloadBytes = []byte(action.Payload)
-	}
-
-	// Create NATS message
-	msg := nats.NewMsg(action.Subject)
-	msg.Data = payloadBytes
-
-	// Add headers if present
-	if len(action.Headers) > 0 {
-		msg.Header = make(nats.Header)
-		for key, value := range action.Headers {
-			msg.Header.Set(key, value)
-		}
-	}
-
-	if traceID != "" {
-		if msg.Header == nil {
-			msg.Header = make(nats.Header)
-		}
-		msg.Header.Set(trace.NATSHeader, traceID)
-	}
-
-	// Publish async
-	ackF, err := sm.jetStream.PublishMsgAsync(msg)
-	if err != nil {
-		// This error occurs if the async buffer is full (backpressure).
-		return fmt.Errorf("jetstream async publish failed on send: %w", err)
-	}
-
-	// Wait for acknowledgement with timeout
-	pubCtx, cancel := context.WithTimeout(ctx, sm.publishCfg.AckTimeout)
-	defer cancel()
-
-	select {
-	case <-ackF.Ok():
-		return nil // Publish was successful.
-	case err := <-ackF.Err():
-		// The server returned an error for this publish.
-		if errors.Is(err, nats.ErrNoResponders) {
-			return fmt.Errorf("jetstream publish failed: no stream is configured for action subject '%s'", action.Subject)
-		}
-		return fmt.Errorf("jetstream async publish failed on ack: %w", err)
-	case <-pubCtx.Done():
-		// We timed out waiting for the server's acknowledgement.
-		return fmt.Errorf("timeout waiting for publish acknowledgement: %w", pubCtx.Err())
-	}
-}
-
-// publishCore publishes to core NATS (fire-and-forget, no ack).
-func (sm *SubscriptionManager) publishCore(ctx context.Context, action *rule.NATSAction, traceID string) error {
-	// Prepare payload
-	var payloadBytes []byte
-	if action.Passthrough {
-		payloadBytes = action.RawPayload
-	} else {
-		payloadBytes = []byte(action.Payload)
-	}
-
-	// Fast path: no headers and no trace ID
-	if len(action.Headers) == 0 && traceID == "" {
-		if err := sm.natsConn.Publish(action.Subject, payloadBytes); err != nil {
-			return fmt.Errorf("core nats publish failed: %w", err)
-		}
-		return nil
-	}
-
-	msg := nats.NewMsg(action.Subject)
-	msg.Data = payloadBytes
-	msg.Header = make(nats.Header)
-	for key, value := range action.Headers {
-		msg.Header.Set(key, value)
-	}
-	if traceID != "" {
-		msg.Header.Set(trace.NATSHeader, traceID)
-	}
-
-	if err := sm.natsConn.PublishMsg(msg); err != nil {
-		return fmt.Errorf("core nats publish with headers failed: %w", err)
-	}
-
-	return nil
+	return sm.publisher.PublishAction(ctx, action, ruleName, traceID)
 }
 
 // Stop gracefully shuts down all subscriptions.
