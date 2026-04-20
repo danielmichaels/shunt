@@ -14,6 +14,7 @@ type CLI struct {
 	cmd.Globals
 
 	Serve    cmd.ServeCmd    `cmd:"" help:"Start the shunt message routing server"`
+	Dev      cmd.DevCmd      `cmd:"" help:"Start shunt with an embedded NATS server (no external deps required)"`
 	New      cmd.NewCmd      `cmd:"" help:"Create a new rule from a template or interactively"`
 	Lint     cmd.LintCmd     `cmd:"" help:"Validate rule file syntax and structure"`
 	Test     cmd.TestCmd     `cmd:"" help:"Run all test suites for rules"`
