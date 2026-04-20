@@ -18,6 +18,13 @@ tasks:
     cmds:
       - task --list
 
+  setup:
+    desc: Configure git hooks (run once after clone)
+    cmds:
+      - git config core.hooksPath hooks
+    status:
+      - test "$(git config core.hooksPath)" = "hooks"
+
   build:
     desc: Build all binaries
     deps:
@@ -76,6 +83,8 @@ tasks:
 
   dev:
     desc: Run shunt with hot-reloading (air)
+    deps:
+      - setup
     cmds:
       - air
 
