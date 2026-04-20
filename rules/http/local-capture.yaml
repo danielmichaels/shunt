@@ -1,0 +1,26 @@
+# Local outbound HTTP capture rule for `shunt dev`
+#
+# Start a tiny local HTTP server (see the dev cheatsheet), then publish a NATS
+# message to notifications.demo. Shunt will make an outbound HTTP POST so you can
+# observe NATS -> HTTP routing locally without any external services.
+- name: dev-local-http-capture
+  trigger:
+    nats:
+      subject: "notifications.demo"
+  action:
+    http:
+      url: "${SHUNT_DEV_DEMO_RECEIVER_URL}"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+        X-Shunt-Demo: "true"
+      payload: |
+        {
+          "message": "{message}",
+          "severity": "{severity}",
+          "from_subject": "{@subject}",
+          "sent_at": "{@timestamp()}",
+          "demo_id": "{@uuid7()}"
+        }
+      retry:
+        maxAttempts: 1

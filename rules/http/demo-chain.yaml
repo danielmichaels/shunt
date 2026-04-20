@@ -1,0 +1,49 @@
+# Two-hop Knative-style chain for `shunt dev`.
+#
+# Emulates the bridge pattern: an HTTP webhook lands in shunt, is published to
+# NATS, then a second rule fires an outbound HTTP POST into a local "function"
+# (the built-in demo receiver). Mirrors: webhook -> NATS -> knative fn.
+#
+#   curl POST /webhooks/demo  --(rule 1)-->  NATS demo.trigger  --(rule 2)-->  POST demo receiver
+
+- name: dev-demo-webhook-inbound
+  trigger:
+    http:
+      path: "/webhooks/demo"
+      method: "POST"
+  action:
+    nats:
+      subject: "demo.trigger"
+      payload: |
+        {
+          "received_via": "http-gateway",
+          "path": "{@path}",
+          "data": {data},
+          "trace_id": "{@uuid7()}",
+          "timestamp": "{@timestamp()}"
+        }
+      headers:
+        X-Demo-Trace: "shunt-dev"
+
+- name: dev-demo-http-outbound
+  trigger:
+    nats:
+      subject: "demo.trigger"
+  action:
+    http:
+      url: "${SHUNT_DEV_DEMO_RECEIVER_URL}"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+        X-Shunt-Demo: "chain"
+        X-Demo-Trace-Id: "{trace_id}"
+      payload: |
+        {
+          "hop": 2,
+          "from_subject": "{@subject}",
+          "trace_id": "{trace_id}",
+          "data": {data},
+          "delivered_at": "{@timestamp()}"
+        }
+      retry:
+        maxAttempts: 1
