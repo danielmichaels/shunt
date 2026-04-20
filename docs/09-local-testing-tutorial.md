@@ -18,7 +18,7 @@ Leave this running for the entire tutorial.
 
 ### Terminal 2 — Build Shunt
 ```bash
-cd /path/to/rule-router
+cd /path/to/shunt
 task build:shunt
 ```
 

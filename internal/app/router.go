@@ -116,13 +116,6 @@ func (app *RouterApp) startGateway(ctx context.Context) error {
 		InboundWorkerCount:  app.config.HTTP.Server.InboundWorkerCount,
 		InboundQueueSize:    app.config.HTTP.Server.InboundQueueSize,
 	}
-	publishConfig := &gateway.PublishConfig{
-		Mode:           app.config.NATS.Publish.Mode,
-		AckTimeout:     app.config.NATS.Publish.AckTimeout,
-		MaxRetries:     app.config.NATS.Publish.MaxRetries,
-		RetryBaseDelay: app.config.NATS.Publish.RetryBaseDelay,
-	}
-
 	app.inboundServer = gateway.NewInboundServer(
 		app.logger,
 		app.metrics,
@@ -130,7 +123,7 @@ func (app *RouterApp) startGateway(ctx context.Context) error {
 		app.broker.GetJetStream(),
 		app.broker.GetNATSConn(),
 		serverConfig,
-		publishConfig,
+		&app.config.NATS.Publish,
 	)
 
 	consumerConfig := &gateway.ConsumerConfig{

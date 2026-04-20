@@ -356,6 +356,27 @@ func TestValidateConfig(t *testing.T) {
 			},
 			wantErr: "",
 		},
+		{
+			name: "publish maxRetries too low",
+			modify: func(cfg *Config) {
+				cfg.NATS.Publish.MaxRetries = 0
+			},
+			wantErr: "publish maxRetries must be at least 1",
+		},
+		{
+			name: "publish retryBaseDelay zero",
+			modify: func(cfg *Config) {
+				cfg.NATS.Publish.RetryBaseDelay = 0
+			},
+			wantErr: "publish retryBaseDelay must be positive",
+		},
+		{
+			name: "publish retryBaseDelay negative",
+			modify: func(cfg *Config) {
+				cfg.NATS.Publish.RetryBaseDelay = -1 * time.Second
+			},
+			wantErr: "publish retryBaseDelay must be positive",
+		},
 	}
 
 	for _, tt := range tests {

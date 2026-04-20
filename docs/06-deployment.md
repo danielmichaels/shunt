@@ -75,7 +75,7 @@ docker run --rm \
   --config /config.yaml
 ```
 
-A reference config with all available options and documentation is provided at `config/shunt.yaml.example`. Copy and customize it as needed.
+A reference config with all available options and documentation is provided at `shunt.yaml.example`. Copy and customize it as needed.
 
 ## Configuration in Containers
 

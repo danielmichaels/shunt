@@ -231,6 +231,10 @@ type ServeOverrides struct {
 	WorkerCount    *int
 }
 
+// NewDefaults returns a Config populated with all default values.
+// Useful for programmatic config construction (e.g. dev/test commands).
+func NewDefaults() *Config { return newDefaults() }
+
 func newDefaults() *Config {
 	return &Config{
 		NATS: NATSConfig{
@@ -463,6 +467,14 @@ func validateConfig(cfg *Config) error {
 
 	if cfg.NATS.Publish.Mode != "jetstream" && cfg.NATS.Publish.Mode != "core" {
 		return fmt.Errorf("publish mode must be 'jetstream' or 'core', got: %s", cfg.NATS.Publish.Mode)
+	}
+
+	if cfg.NATS.Publish.MaxRetries < 1 {
+		return fmt.Errorf("publish maxRetries must be at least 1")
+	}
+
+	if cfg.NATS.Publish.RetryBaseDelay <= 0 {
+		return fmt.Errorf("publish retryBaseDelay must be positive")
 	}
 
 	validLogLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}

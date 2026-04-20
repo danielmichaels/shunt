@@ -140,8 +140,13 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 	}
 
 	if err := m.broker.RefreshStreams(); err != nil {
-		m.logger.Warn("failed to refresh stream list before validating rules",
+		m.logger.Warn("failed to refresh stream list, retrying once",
 			"key", key, "error", err)
+		if err = m.broker.RefreshStreams(); err != nil {
+			m.logger.Error("failed to refresh stream list, cannot validate rules",
+				"key", key, "error", err)
+			return
+		}
 	}
 
 	resolver := m.broker.GetStreamResolver()
