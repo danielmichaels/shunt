@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-04-21
+
+### 🐛 Bug Fixes
+
+- Headers are now case insensitive (#30)([dac8491](https://github.com/danielmichaels/shunt/commit/dac84915dbe14c47b06a52b796d47a8efacac136))
+- Code review fixes + shunt dev subcommand (#28)([3d5b8f6](https://github.com/danielmichaels/shunt/commit/3d5b8f63cf979473e99df8839ec16fc6630b9efa))
+- Bug fixes and publisher consolidation (#27)([3708024](https://github.com/danielmichaels/shunt/commit/3708024302176ab2667b5d51c7bff956987d5cc2))
+
+### 🔧 CI
+
+- Enforce conventional commits via tracked commit-msg hook (#29)([a01cc71](https://github.com/danielmichaels/shunt/commit/a01cc7109b1e07f1085bcf0d8500aa05eecadbec))
 ## [0.1.0] - 2026-03-24
 
 ### 🐛 Bug Fixes
