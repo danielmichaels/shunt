@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-04-23
+
+### 🐛 Bug Fixes
+
+- Add fallback version behaviour for go install (#33)([0b5c8b3](https://github.com/danielmichaels/shunt/commit/0b5c8b30a98533ee47abeb29f53ad125bc2a2657))
+
+### 🔧 CI
+
+- *(release)* Switch to tag-driven workflow with atomic Taskfile push (#34)([82e5557](https://github.com/danielmichaels/shunt/commit/82e55570e3debd24d48afc993edb917fb2c271d0))
 ## [0.1.1] - 2026-04-23
 
 ### 🐛 Bug Fixes
