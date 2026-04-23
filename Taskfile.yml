@@ -127,20 +127,29 @@ tasks:
       - git cliff {{.FROM}}..HEAD
 
   release:tag:
-    desc: "Tag a release and regenerate the full changelog"
+    desc: "Cut a release: regenerate CHANGELOG, commit, tag, and push atomically. Triggers goreleaser CI."
     requires:
       vars: [TAG]
     preconditions:
+      - sh: '[[ "{{.TAG}}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]'
+        msg: "TAG must match vX.Y.Z or vX.Y.Z-prerelease (got: {{.TAG}})."
+      - sh: '[ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]'
+        msg: "Releases must be cut from main. Checkout main first."
       - sh: git diff --quiet
         msg: "Working directory is dirty. Commit or stash changes first."
       - sh: git diff --cached --quiet
         msg: "Staged changes exist. Commit or stash first."
+      - sh: git fetch --tags origin && [ "$(git rev-parse @)" = "$(git rev-parse @{u})" ]
+        msg: "Local main is not in sync with origin/main. Pull first."
+      - sh: '! git rev-parse -q --verify "refs/tags/{{.TAG}}" >/dev/null'
+        msg: "Tag {{.TAG}} already exists locally or on origin."
     cmds:
       - git cliff -o CHANGELOG.md --tag {{.TAG}}
       - git add CHANGELOG.md
-      - 'git commit -m "chore(release): update changelog for {{.TAG}}"'
+      - 'git commit -m "chore(release): {{.TAG}}"'
       - 'git tag -a {{.TAG}} -m "Release {{.TAG}}"'
-      - 'echo "Tagged {{.TAG}}. Push with ''git push origin main --tags'' to trigger goreleaser."'
+      - git push --atomic origin main {{.TAG}}
+      - 'echo "✓ Pushed {{.TAG}}. Watch the release workflow: https://github.com/danielmichaels/shunt/actions"'
 
   release:dry:
     desc: "Dry-run goreleaser to validate config"
