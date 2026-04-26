@@ -1,0 +1,43 @@
+version: "3"
+
+vars:
+  MKDOCS_MATERIAL_VERSION: "9.5.49"
+  # click>=8.3 breaks mkdocs livereload (mkdocs#4032). Pin until upstream resolves.
+  CLICK_CONSTRAINT: "click<=8.2.1"
+  UVX_RUN: >-
+    uvx
+    --with mkdocs-material=={{.MKDOCS_MATERIAL_VERSION}}
+    --with '{{.CLICK_CONSTRAINT}}'
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task --list --taskfile Taskfile.docs.yml
+
+  serve:
+    desc: "Run docs site locally with live reload (http://127.0.0.1:8800)"
+    vars:
+      DOCS_PORT: '{{.DOCS_PORT | default "8800"}}'
+    cmds:
+      - "{{.UVX_RUN}} mkdocs serve --livereload --dev-addr 127.0.0.1:{{.DOCS_PORT}} {{.CLI_ARGS}}"
+
+  build:
+    desc: "Build static site into ./site"
+    cmds:
+      - "{{.UVX_RUN}} mkdocs build --strict {{.CLI_ARGS}}"
+
+  clean:
+    desc: "Remove built site"
+    cmds:
+      - rm -rf site
+
+  check:
+    desc: "Strict build — fails on warnings (broken links, missing files, etc.)"
+    cmds:
+      - "{{.UVX_RUN}} mkdocs build --strict --clean"
+
+  deps:
+    desc: "Pre-warm uvx cache for the pinned mkdocs-material version"
+    cmds:
+      - "{{.UVX_RUN}} mkdocs --version"

@@ -39,3 +39,6 @@ tmp
 .task
 dist
 .worktrees
+
+# MkDocs build output
+site/

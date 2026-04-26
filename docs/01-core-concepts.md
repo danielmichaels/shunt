@@ -20,6 +20,7 @@ When `name` is omitted the trigger subject (NATS) or path (HTTP) is used as the 
 A trigger defines the event that initiates a rule evaluation.
 
 **NATS Trigger**: Evaluates a message from a NATS subject.
+
 ```yaml
 trigger:
   nats:
@@ -27,6 +28,7 @@ trigger:
 ```
 
 **HTTP Trigger**: Evaluates an incoming HTTP request.
+
 ```yaml
 trigger:
   http:
@@ -45,11 +47,13 @@ Conditions are an optional block of logic that must evaluate to `true` for the a
 This consistent syntax applies to both the `field` (left side) and `value` (right side) of conditions.
 
 **Supported Variable Types:**
+
 - Message fields: `{temperature}`, `{user.name}`
 - System variables: `{@time.hour}`, `{@subject.1}`, `{@header.X-Device-ID}`
 - KV lookups: `{@kv.device_status.{device_id}:status}`
 
 **Values can be:**
+
 - Templates (for variable comparisons): `{threshold}`, `{@kv.config:max_temp}`
 - Literals: `30`, `"active"`, `true`
 
@@ -79,7 +83,7 @@ conditions:
       value: "active"
 ```
 
-### Variable-to-Variable Comparisons (NEW!)
+### Variable-to-Variable Comparisons 
 
 The rule engine now supports comparing variables to other variables, enabling dynamic thresholds and cross-field validation:
 
@@ -117,15 +121,16 @@ Variables are resolved to their native types for accurate comparison:
 - **Automatic type coercion**: When comparing different types (e.g., string `"30"` vs number `30`)
 
 This ensures numeric comparisons work correctly:
+
 ```yaml
 # These both work correctly
-- field: "{count}"        # count = 42 (number)
+- field: "{count}"   # count = 42 (number)
   operator: gt
-  value: "{limit}"        # limit = 50 (number)
+  value: "{limit}"   # limit = 50 (number)
 
-- field: "{count}"        # count = 42 (number)
+- field: "{count}"   # count = 42 (number)
   operator: gt
-  value: "40"             # String "40" coerced to number
+  value: "40"        # String "40" coerced to number
 ```
 
 ### Common Use Cases
@@ -210,7 +215,7 @@ An action defines the work to be done when a rule's conditions are met.
 action:
   nats:
     subject: "alerts.high_temp.{device_id}"
-    mode: core              # optional: "core" or "jetstream" (overrides global nats.publish.mode)
+    mode: core      # optional: "core" or "jetstream" (overrides global nats.publish.mode)
     payload: |
       {
         "alert": "High temperature detected!",
@@ -223,6 +228,7 @@ action:
 The optional `mode` field overrides the global `nats.publish.mode` for this action only. Use `core` for fire-and-forget (notifications, dashboards) or `jetstream` for durable delivery (audit logs, safety alerts). When omitted, the global setting applies. See [Per-Rule Publish Mode Override](./07-configuration.md#per-rule-publish-mode-override) for examples.
 
 **HTTP Action**: Makes an outbound HTTP request to an external service.
+
 ```yaml
 action:
   http:
@@ -342,6 +348,7 @@ Environment variables can be used in **both conditions and actions**:
 #### In Actions
 
 **NATS Actions:**
+
 ```yaml
 action:
   nats:
@@ -356,6 +363,7 @@ action:
 ```
 
 **HTTP Actions:**
+
 ```yaml
 action:
   http:
