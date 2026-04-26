@@ -1,6 +1,6 @@
 site_name: Shunt
 site_description: A high-performance, rule-based message router built on NATS
-site_url: https://danielmichaels.github.io/shunt/
+site_url: https://shunt.danielms.site/
 site_author: Daniel Michaels
 
 repo_name: danielmichaels/shunt
@@ -11,6 +11,7 @@ docs_dir: docs
 
 theme:
   name: material
+  custom_dir: overrides
   language: en
   features:
     - navigation.instant
