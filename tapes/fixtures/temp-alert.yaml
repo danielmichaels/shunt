@@ -1,0 +1,15 @@
+- name: high-temp-alert
+  trigger:
+    nats:
+      subject: "sensors.temperature.>"
+  conditions:
+    operator: and
+    items:
+      - field: "{temperature}"
+        operator: gt
+        value: 30
+  action:
+    nats:
+      subject: "alerts.{@subject.2}"
+      payload: |
+        {"alert":"high temp","temperature":{temperature},"location":"{@subject.2}"}

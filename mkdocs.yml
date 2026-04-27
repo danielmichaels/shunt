@@ -89,6 +89,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - Local Testing Tutorial: 09-local-testing-tutorial.md
+      - KV Lifecycle Tour: 10-kv-lifecycle.md
   - Concepts:
       - Core Concepts: 01-core-concepts.md
       - System Variables: 02-system-variables.md

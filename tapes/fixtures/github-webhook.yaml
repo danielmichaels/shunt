@@ -1,0 +1,16 @@
+- name: github-push-event
+  trigger:
+    http:
+      path: "/webhooks/github"
+      method: "POST"
+  conditions:
+    operator: and
+    items:
+      - field: "{@header.X-GitHub-Event}"
+        operator: eq
+        value: "push"
+  action:
+    nats:
+      subject: "github.{@header.X-GitHub-Event}.{repository.name}"
+      payload: |
+        {"repo":"{repository.full_name}","pusher":"{pusher.name}"}
