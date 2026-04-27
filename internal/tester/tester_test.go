@@ -3,8 +3,13 @@
 package tester
 
 import (
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/danielmichaels/shunt/internal/logger"
 	"github.com/danielmichaels/shunt/internal/rule"
 )
 
@@ -651,4 +656,82 @@ func TestHasVariableComparisonsRecursive(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQuickCheck_HeaderGatedRule(t *testing.T) {
+	tempDir := t.TempDir()
+
+	ruleYAML := `- trigger:
+    http:
+      path: "/webhook"
+      method: "POST"
+  conditions:
+    operator: and
+    items:
+      - field: "{@header.X-Test-Event}"
+        operator: eq
+        value: "ping"
+  action:
+    nats:
+      subject: "test.matched"
+      payload: |
+        {"ok": true}
+`
+	rulePath := filepath.Join(tempDir, "rule.yaml")
+	if err := os.WriteFile(rulePath, []byte(ruleYAML), 0644); err != nil {
+		t.Fatalf("write rule: %v", err)
+	}
+
+	msgPath := filepath.Join(tempDir, "msg.json")
+	if err := os.WriteFile(msgPath, []byte(`{"foo":"bar"}`), 0644); err != nil {
+		t.Fatalf("write msg: %v", err)
+	}
+
+	runner := New(logger.NewNopLogger(), false, 0)
+
+	// Without headers → rule should not match.
+	out := captureStdout(t, func() {
+		if err := runner.QuickCheck(QuickCheckOptions{
+			RulePath:    rulePath,
+			MessagePath: msgPath,
+		}); err != nil {
+			t.Fatalf("QuickCheck without headers: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Rule Matched: False") {
+		t.Errorf("expected 'Rule Matched: False' without headers, got:\n%s", out)
+	}
+
+	// With matching header → rule should match.
+	out = captureStdout(t, func() {
+		if err := runner.QuickCheck(QuickCheckOptions{
+			RulePath:    rulePath,
+			MessagePath: msgPath,
+			Headers:     map[string]string{"X-Test-Event": "ping"},
+		}); err != nil {
+			t.Fatalf("QuickCheck with headers: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Rule Matched: True") {
+		t.Errorf("expected 'Rule Matched: True' with headers, got:\n%s", out)
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	fn()
+	w.Close()
+	os.Stdout = orig
+	return <-done
 }

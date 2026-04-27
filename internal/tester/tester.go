@@ -870,20 +870,32 @@ func (t *Tester) printScaffoldTips(features RuleFeatures) {
 	fmt.Println("   • ForEach fields use {braces}: forEach: \"{items}\"")
 }
 
+// QuickCheckOptions configures a single QuickCheck invocation.
+type QuickCheckOptions struct {
+	RulePath    string
+	MessagePath string
+	Subject     string
+	KVMockPath  string
+	Headers     map[string]string
+}
+
 // QuickCheck runs the quick check mode for interactive testing.
-func (t *Tester) QuickCheck(rulePath, messagePath, subjectOverride, kvMockPath string) error {
-	rules, err := loadSingleRuleFile(rulePath)
+func (t *Tester) QuickCheck(opts QuickCheckOptions) error {
+	rules, err := loadSingleRuleFile(opts.RulePath)
 	if err != nil || len(rules) == 0 {
-		return fmt.Errorf("could not load or parse rule file %s: %w", rulePath, err)
+		return fmt.Errorf("could not load or parse rule file %s: %w", opts.RulePath, err)
 	}
 	r := rules[0]
 
-	// Setup test config based on the actual rule trigger
-	testConfig := &TestConfig{Headers: make(map[string]string)}
+	headers := opts.Headers
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	testConfig := &TestConfig{Headers: headers}
 	if r.Trigger.NATS != nil {
 		testConfig.MockTrigger.NATS = r.Trigger.NATS
-		if subjectOverride != "" {
-			testConfig.MockTrigger.NATS.Subject = subjectOverride
+		if opts.Subject != "" {
+			testConfig.MockTrigger.NATS.Subject = opts.Subject
 		}
 		fmt.Printf("▶ Running Quick Check (NATS) on subject: %s\n\n", testConfig.MockTrigger.NATS.Subject)
 	} else if r.Trigger.HTTP != nil {
@@ -893,12 +905,12 @@ func (t *Tester) QuickCheck(rulePath, messagePath, subjectOverride, kvMockPath s
 		return fmt.Errorf("rule has no valid trigger")
 	}
 
-	kvData := loadMockKV(kvMockPath)
-	processor := setupTestProcessor(rulePath, kvData, testConfig, t.Verbose)
+	kvData := loadMockKV(opts.KVMockPath)
+	processor := setupTestProcessor(opts.RulePath, kvData, testConfig, t.Verbose)
 
-	msgBytes, err := os.ReadFile(messagePath)
+	msgBytes, err := os.ReadFile(opts.MessagePath)
 	if err != nil {
-		return fmt.Errorf("failed to read message file %s: %w", messagePath, err)
+		return fmt.Errorf("failed to read message file %s: %w", opts.MessagePath, err)
 	}
 
 	start := time.Now()
