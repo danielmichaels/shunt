@@ -2,6 +2,20 @@
 
 A graduated, hands-on tutorial for running Shunt locally. Each lesson builds on the previous one, introducing one new concept at a time.
 
+Two quick tastes of `shunt check` before the deep dive — first a NATS rule, then an HTTP rule gated on a header. Same offline-validation tool, both transports.
+
+A NATS temperature alert: a rule, an input message, and the matched/rendered action.
+
+<video controls loop muted playsinline style="max-width: 100%; border-radius: 6px; margin: 1em 0;">
+  <source src="/assets/casts/rule-check.webm" type="video/webm">
+</video>
+
+An HTTP webhook rule gated on `{@header.X-GitHub-Event}`. The first run omits `--header` and fails the gate; the second injects the header and the rule fires, rendering a NATS action whose subject and payload are templated from the message body and header value.
+
+<video controls loop muted playsinline style="max-width: 100%; border-radius: 6px; margin: 1em 0;">
+  <source src="/assets/casts/http-rule.webm" type="video/webm">
+</video>
+
 ## Prerequisites
 
 ```bash
@@ -496,6 +510,38 @@ SHUNT_LOG_LEVEL=debug \
 nats sub ">"
 ```
 
+### Validate offline first with `shunt check`
+
+Before sending real HTTP traffic, dry-run the rule against a fixture message. `shunt check --header` injects HTTP headers without needing the gateway running, so you can iterate on rule conditions and templates in milliseconds:
+
+```bash
+# Save the same payload the curl example below will send
+cat > /tmp/pr-webhook.json <<'EOF'
+{
+  "action": "opened",
+  "number": 42,
+  "repository": {"name": "shunt"},
+  "user": {"login": "octocat"},
+  "pull_request": {
+    "title": "Add new feature",
+    "html_url": "https://github.com/example/shunt/pull/42"
+  }
+}
+EOF
+
+# No header → header-gated rule does not match
+./bin/shunt check --rule rules/http/webhooks.yaml --message /tmp/pr-webhook.json
+# → Rule Matched: False
+
+# Inject the header → rule matches and renders the action
+./bin/shunt check --rule rules/http/webhooks.yaml --message /tmp/pr-webhook.json \
+  --header "X-GitHub-Event: pull_request"
+# → Rule Matched: True
+# → Rendered Action: subject github.pr.shunt.opened with templated payload
+```
+
+The `--header` flag is repeatable (e.g., add `--header "X-Hub-Signature-256: sha256=..."` to test signature-gated rules). Values containing `:` and `,` pass through verbatim.
+
 ### Test inbound webhook (HTTP → NATS)
 ```bash
 # Simulate a GitHub PR webhook
@@ -538,6 +584,7 @@ curl -X POST http://localhost:8080/webhooks/generic \
 | `./bin/shunt kv pull <key>` | Pull a specific rule |
 | `./bin/shunt kv delete <key>` | Delete a rule |
 | `./bin/shunt lint -r <dir>` | Validate rules offline |
+| `./bin/shunt check --rule <r> --message <m>` | Dry-run a rule against a single message (`--header K:V` repeatable, `--subject` for NATS, `--kv-mock` for KV fixtures) |
 | `./bin/shunt new -t <template>` | Generate a rule from template |
 | `./bin/shunt new -i` | Interactive rule builder |
 | `nats pub <subject> '<json>'` | Publish a test message |

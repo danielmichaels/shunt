@@ -41,3 +41,27 @@ tasks:
     desc: "Pre-warm uvx cache for the pinned mkdocs-material version"
     cmds:
       - "{{.UVX_RUN}} mkdocs --version"
+
+  tapes:
+    desc: "Re-render all VHS tapes into docs/assets/casts/ (requires `brew install vhs`)"
+    preconditions:
+      - sh: "command -v vhs >/dev/null"
+        msg: "vhs not found — install with `brew install vhs`"
+      - sh: "test -x ./bin/shunt"
+        msg: "./bin/shunt not built — run `task build:shunt` first"
+    cmds:
+      - mkdir -p docs/assets/casts
+      - 'for t in tapes/*.tape; do echo ">>> $t" && vhs "$t"; done'
+
+  tape:
+    desc: "Re-render a single VHS tape: TAPE=tapes/foo.tape task docs:tape"
+    requires:
+      vars: [TAPE]
+    preconditions:
+      - sh: "command -v vhs >/dev/null"
+        msg: "vhs not found — install with `brew install vhs`"
+      - sh: "test -x ./bin/shunt"
+        msg: "./bin/shunt not built — run `task build:shunt` first"
+    cmds:
+      - mkdir -p docs/assets/casts
+      - vhs {{.TAPE}}

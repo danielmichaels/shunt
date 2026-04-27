@@ -4,6 +4,10 @@ A high-performance, rule-based message router for NATS JetStream with an integra
 
 Rules are stored in NATS KV and hot-reloaded via KV Watch — no restarts required.
 
+<video autoplay loop muted playsinline style="max-width: 100%; border-radius: 6px; margin: 1em 0;">
+  <source src="/assets/casts/homepage-hero.webm" type="video/webm">
+</video>
+
 ## Features
 
 *   **High Performance**: Microsecond rule evaluation, asynchronous processing, thousands of messages per second.
