@@ -16,6 +16,7 @@ func RunJetStreamServer(t *testing.T) *server.Server {
 	opts := natsserver.DefaultTestOptions
 	opts.Port = -1
 	opts.JetStream = true
+	opts.StoreDir = t.TempDir()
 	return natsserver.RunServer(&opts)
 }
 
