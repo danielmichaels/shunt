@@ -35,6 +35,14 @@ const (
 	watcherShutdownTimeout = 5 * time.Second
 )
 
+// consumerRef caches the stream resolved at creation time; without it
+// RemoveSubscription would re-resolve and could silently target the wrong
+// stream if a newer overlapping stream had been added in the interim.
+type consumerRef struct {
+	stream   string
+	consumer string
+}
+
 // NATSBroker connects to external NATS JetStream servers with KV support and local caching
 type NATSBroker struct {
 	logger  *slog.Logger
@@ -59,7 +67,7 @@ type NATSBroker struct {
 
 	// Consumer management - track created consumers
 	consumersMu sync.RWMutex
-	consumers   map[string]string // subject -> consumer name
+	consumers   map[string]consumerRef // subject -> stream and consumer name
 
 	// Context for managing watchers and long-running operations
 	ctx    context.Context
@@ -78,7 +86,7 @@ func NewNATSBroker(cfg *config.Config, log *slog.Logger, metrics *metrics.Metric
 		kvStores:     make(map[string]jetstream.KeyValue),
 		localKVCache: rule.NewLocalKVCache(log),
 		kvWatchers:   make([]jetstream.KeyWatcher, 0),
-		consumers:    make(map[string]string),
+		consumers:    make(map[string]consumerRef),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -143,7 +151,7 @@ func (b *NATSBroker) CreateConsumerForSubject(subject string) error {
 	}
 
 	b.consumersMu.Lock()
-	b.consumers[subject] = consumerName
+	b.consumers[subject] = consumerRef{stream: streamName, consumer: consumerName}
 	b.consumersMu.Unlock()
 
 	b.logger.Debug("created/updated durable consumer",
@@ -248,23 +256,15 @@ func (b *NATSBroker) AddSubscription(subject string) error {
 		return fmt.Errorf("subscription manager not initialized")
 	}
 
-	// Get consumer name
 	b.consumersMu.RLock()
-	consumerName, exists := b.consumers[subject]
+	ref, exists := b.consumers[subject]
 	b.consumersMu.RUnlock()
 	if !exists {
 		return fmt.Errorf("consumer not created for subject '%s'", subject)
 	}
 
-	// Get stream name
-	streamName, err := b.streamResolver.FindStreamForSubject(subject)
-	if err != nil {
-		return fmt.Errorf("cannot find stream for subject '%s': %w", subject, err)
-	}
-
-	// Add subscription with configured worker count, using broker's context
 	workers := b.config.NATS.Consumers.WorkerCount
-	if err := b.subscriptionMgr.AddSubscription(b.ctx, streamName, consumerName, subject, workers); err != nil {
+	if err := b.subscriptionMgr.AddSubscription(b.ctx, ref.stream, ref.consumer, subject, workers); err != nil {
 		return fmt.Errorf("failed to add subscription for '%s': %w", subject, err)
 	}
 
@@ -284,34 +284,51 @@ func (b *NATSBroker) AddAndStartSubscription(subject string) error {
 	}
 
 	b.consumersMu.RLock()
-	consumerName, exists := b.consumers[subject]
+	ref, exists := b.consumers[subject]
 	b.consumersMu.RUnlock()
 	if !exists {
 		return fmt.Errorf("consumer not found after creation for subject '%s'", subject)
 	}
 
-	streamName, err := b.streamResolver.FindStreamForSubject(subject)
-	if err != nil {
-		return fmt.Errorf("cannot find stream for subject '%s': %w", subject, err)
-	}
-
 	workers := b.config.NATS.Consumers.WorkerCount
-	return b.subscriptionMgr.AddAndStartSubscription(b.ctx, streamName, consumerName, subject, workers)
+	return b.subscriptionMgr.AddAndStartSubscription(b.ctx, ref.stream, ref.consumer, subject, workers)
 }
 
-// RemoveSubscription stops and removes the subscription for a subject.
-// Optionally deletes the durable consumer from the stream.
+// RemoveSubscription is fire-and-forget by design: deletion errors are logged
+// (consumer left for manual cleanup) and ErrConsumerNotFound is treated as
+// success so callers can replay the call without spurious warnings.
 func (b *NATSBroker) RemoveSubscription(subject string) {
 	if b.subscriptionMgr == nil {
 		return
 	}
 
 	b.subscriptionMgr.RemoveSubscription(subject)
+
 	b.consumersMu.Lock()
+	ref, ok := b.consumers[subject]
 	delete(b.consumers, subject)
 	b.consumersMu.Unlock()
 
-	b.logger.Info("subscription and consumer tracking removed", "subject", subject)
+	if !ok {
+		b.logger.Info("subscription removed (no tracked consumer)", "subject", subject)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(b.ctx, subscriptionOperationTimeout)
+	defer cancel()
+	if err := b.jetStream.DeleteConsumer(ctx, ref.stream, ref.consumer); err != nil {
+		if errors.Is(err, jetstream.ErrConsumerNotFound) {
+			b.logger.Info("consumer already gone",
+				"subject", subject, "stream", ref.stream, "consumer", ref.consumer)
+			return
+		}
+		b.logger.Warn("failed to delete durable consumer; manual cleanup required",
+			"subject", subject, "stream", ref.stream, "consumer", ref.consumer, "error", err)
+		return
+	}
+
+	b.logger.Info("subscription and durable consumer removed",
+		"subject", subject, "stream", ref.stream, "consumer", ref.consumer)
 }
 
 // GenerateConsumerName creates a valid NATS consumer name from a subject
@@ -669,10 +686,10 @@ func (b *NATSBroker) GetNATSConn() *nats.Conn {
 // GetConsumerName returns the consumer name for a subject
 func (b *NATSBroker) GetConsumerName(subject string) string {
 	b.consumersMu.RLock()
-	name, exists := b.consumers[subject]
+	ref, exists := b.consumers[subject]
 	b.consumersMu.RUnlock()
 	if exists {
-		return name
+		return ref.consumer
 	}
 	return b.GenerateConsumerName(subject)
 }

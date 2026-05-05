@@ -169,6 +169,17 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 	newHTTPSubjects := m.collectHTTPActionSubjects(rules)
 	outbound := m.outboundSubscriber
 
+	stillNeededNATS := make(map[string]bool)
+	stillNeededHTTP := make(map[string]bool)
+	for _, keyRules := range m.currentRules {
+		for subject := range m.collectNATSSubjects(keyRules) {
+			stillNeededNATS[subject] = true
+		}
+		for subject := range m.collectHTTPActionSubjects(keyRules) {
+			stillNeededHTTP[subject] = true
+		}
+	}
+
 	m.mu.Unlock()
 
 	for subject := range newNATSSubjects {
@@ -189,6 +200,17 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 	for subject := range newHTTPSubjects {
 		if !previousHTTPSubjects[subject] {
 			m.doAddOutboundSubscription(outbound, subject)
+		}
+	}
+
+	for subject := range previousNATSSubjects {
+		if !stillNeededNATS[subject] {
+			m.broker.RemoveSubscription(subject)
+		}
+	}
+	for subject := range previousHTTPSubjects {
+		if !stillNeededHTTP[subject] {
+			m.doRemoveOutboundSubscription(outbound, subject)
 		}
 	}
 

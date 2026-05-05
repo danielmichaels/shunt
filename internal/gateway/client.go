@@ -177,10 +177,12 @@ func (c *OutboundClient) AddOutboundSubscription(ctx context.Context, streamName
 }
 
 // RemoveOutboundSubscription implements broker.OutboundSubscriber.
+// Fire-and-forget by design: deletion errors are logged (consumer left for
+// manual cleanup) and ErrConsumerNotFound is treated as success so callers
+// can replay the call without spurious warnings.
 func (c *OutboundClient) RemoveOutboundSubscription(subject string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	var removed *OutboundSubscription
 	for i, sub := range c.subscriptions {
 		if sub.Subject == subject {
 			if sub.iterator != nil {
@@ -189,11 +191,32 @@ func (c *OutboundClient) RemoveOutboundSubscription(subject string) {
 			if sub.cancel != nil {
 				sub.cancel()
 			}
+			removed = sub
 			c.subscriptions = append(c.subscriptions[:i], c.subscriptions[i+1:]...)
-			c.logger.Debug("outbound subscription removed", "subject", subject)
-			return
+			break
 		}
 	}
+	c.mu.Unlock()
+
+	if removed == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), clientOperationTimeout)
+	defer cancel()
+	if err := c.jetstream.DeleteConsumer(ctx, removed.StreamName, removed.ConsumerName); err != nil {
+		if errors.Is(err, jetstream.ErrConsumerNotFound) {
+			c.logger.Info("outbound consumer already gone",
+				"subject", subject, "stream", removed.StreamName, "consumer", removed.ConsumerName)
+			return
+		}
+		c.logger.Warn("failed to delete outbound durable consumer; manual cleanup required",
+			"subject", subject, "stream", removed.StreamName, "consumer", removed.ConsumerName, "error", err)
+		return
+	}
+
+	c.logger.Info("outbound subscription and durable consumer removed",
+		"subject", subject, "stream", removed.StreamName, "consumer", removed.ConsumerName)
 }
 
 // Start begins consuming messages and making HTTP requests
