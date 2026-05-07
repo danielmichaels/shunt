@@ -74,6 +74,10 @@ type OutboundSubscription struct {
 	iterator     jetstream.MessagesContext // Messages() iterator
 	cancel       context.CancelFunc
 	logger       *slog.Logger
+	// workersWG drains in-flight workers during RemoveOutboundSubscription so
+	// the caller can safely delete the durable consumer afterwards without
+	// racing in-flight Ack/Nak calls.
+	workersWG sync.WaitGroup
 }
 
 // ConsumerConfig contains JetStream consumer configuration
@@ -170,6 +174,14 @@ func (c *OutboundClient) AddOutboundSubscription(ctx context.Context, streamName
 	}
 
 	if err := c.startSubscription(ctx, sub); err != nil {
+		c.mu.Lock()
+		for i, s := range c.subscriptions {
+			if s == sub {
+				c.subscriptions = append(c.subscriptions[:i], c.subscriptions[i+1:]...)
+				break
+			}
+		}
+		c.mu.Unlock()
 		return fmt.Errorf("failed to start outbound subscription for '%s': %w", subject, err)
 	}
 
@@ -177,9 +189,10 @@ func (c *OutboundClient) AddOutboundSubscription(ctx context.Context, streamName
 }
 
 // RemoveOutboundSubscription implements broker.OutboundSubscriber.
-// Fire-and-forget by design: deletion errors are logged (consumer left for
-// manual cleanup) and ErrConsumerNotFound is treated as success so callers
-// can replay the call without spurious warnings.
+// Blocks until in-flight workers finish so the subsequent DeleteConsumer call
+// does not race an in-flight Ack/Nak. Deletion errors are logged (consumer
+// left for manual cleanup) and ErrConsumerNotFound is treated as success so
+// callers can replay the call without spurious warnings.
 func (c *OutboundClient) RemoveOutboundSubscription(subject string) {
 	c.mu.Lock()
 	var removed *OutboundSubscription
@@ -201,6 +214,8 @@ func (c *OutboundClient) RemoveOutboundSubscription(subject string) {
 	if removed == nil {
 		return
 	}
+
+	removed.workersWG.Wait()
 
 	ctx, cancel := context.WithTimeout(context.Background(), clientOperationTimeout)
 	defer cancel()
@@ -277,6 +292,7 @@ func (c *OutboundClient) startSubscription(ctx context.Context, sub *OutboundSub
 
 	for i := 0; i < sub.Workers; i++ {
 		c.wg.Add(1)
+		sub.workersWG.Add(1)
 		go c.messageWorker(subCtx, sub, i)
 	}
 
@@ -291,6 +307,7 @@ func (c *OutboundClient) startSubscription(ctx context.Context, sub *OutboundSub
 // This replaces the old fetcher + processingWorker pattern with a simpler approach
 func (c *OutboundClient) messageWorker(ctx context.Context, sub *OutboundSubscription, workerID int) {
 	defer c.wg.Done()
+	defer sub.workersWG.Done()
 
 	c.logger.Debug("outbound message worker started",
 		"subject", sub.Subject,

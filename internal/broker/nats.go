@@ -291,7 +291,20 @@ func (b *NATSBroker) AddAndStartSubscription(subject string) error {
 	}
 
 	workers := b.config.NATS.Consumers.WorkerCount
-	return b.subscriptionMgr.AddAndStartSubscription(b.ctx, ref.stream, ref.consumer, subject, workers)
+	if err := b.subscriptionMgr.AddAndStartSubscription(b.ctx, ref.stream, ref.consumer, subject, workers); err != nil {
+		b.consumersMu.Lock()
+		delete(b.consumers, subject)
+		b.consumersMu.Unlock()
+
+		delCtx, delCancel := context.WithTimeout(b.ctx, subscriptionOperationTimeout)
+		defer delCancel()
+		if delErr := b.jetStream.DeleteConsumer(delCtx, ref.stream, ref.consumer); delErr != nil && !errors.Is(delErr, jetstream.ErrConsumerNotFound) {
+			b.logger.Warn("failed to delete orphaned durable consumer after subscription start failure",
+				"subject", subject, "stream", ref.stream, "consumer", ref.consumer, "error", delErr)
+		}
+		return err
+	}
+	return nil
 }
 
 // RemoveSubscription is fire-and-forget by design: deletion errors are logged

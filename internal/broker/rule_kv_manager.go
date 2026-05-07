@@ -16,11 +16,20 @@ type OutboundSubscriber interface {
 	RemoveOutboundSubscription(subject string)
 }
 
+// subscriptionController abstracts the broker subscription operations used by
+// handleRulePut. Tests in this package may swap the default (the broker) for a
+// wrapper that injects failures.
+type subscriptionController interface {
+	AddAndStartSubscription(subject string) error
+	RemoveSubscription(subject string)
+}
+
 type RuleKVManager struct {
 	kvBucket            string
 	autoProvision       bool
 	processor           *rule.Processor
 	broker              *NATSBroker
+	subscriber          subscriptionController
 	rulesLoader         *rule.RulesLoader
 	logger              *slog.Logger
 	currentRules        map[string][]rule.Rule
@@ -48,6 +57,7 @@ func NewRuleKVManager(
 		autoProvision: autoProvision,
 		processor:     processor,
 		broker:        broker,
+		subscriber:    broker,
 		rulesLoader:   rulesLoader,
 		logger:        log,
 		currentRules:  make(map[string][]rule.Rule),
@@ -158,16 +168,65 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 		return
 	}
 
+	// Try-then-commit: bring up subscriptions for any newly-introduced subjects
+	// before mutating m.currentRules. If any add fails, roll back the partial
+	// adds and leave the previous rule state intact — the working consumers
+	// keep running until the operator pushes a corrected revision.
 	m.mu.Lock()
-
 	previousNATSSubjects := m.collectNATSSubjects(m.currentRules[key])
 	previousHTTPSubjects := m.collectHTTPActionSubjects(m.currentRules[key])
-	m.currentRules[key] = rules
-	m.pushRulesToProcessor()
+	outbound := m.outboundSubscriber
+	m.mu.Unlock()
 
 	newNATSSubjects := m.collectNATSSubjects(rules)
 	newHTTPSubjects := m.collectHTTPActionSubjects(rules)
-	outbound := m.outboundSubscriber
+
+	var addedNATS, addedHTTP []string
+	var addErr error
+
+	for subject := range newNATSSubjects {
+		if previousNATSSubjects[subject] {
+			continue
+		}
+		if err := m.subscriber.AddAndStartSubscription(subject); err != nil {
+			m.logger.Error("failed to start subscription for new subject — aborting rule update",
+				"key", key, "revision", revision, "subject", subject, "error", err)
+			addErr = err
+			break
+		}
+		addedNATS = append(addedNATS, subject)
+	}
+
+	if addErr == nil {
+		for subject := range newHTTPSubjects {
+			if previousHTTPSubjects[subject] {
+				continue
+			}
+			if err := m.doAddOutboundSubscription(outbound, subject); err != nil {
+				m.logger.Error("failed to register HTTP outbound for new subject — aborting rule update",
+					"key", key, "revision", revision, "subject", subject, "error", err)
+				addErr = err
+				break
+			}
+			addedHTTP = append(addedHTTP, subject)
+		}
+	}
+
+	if addErr != nil {
+		for _, subject := range addedNATS {
+			m.subscriber.RemoveSubscription(subject)
+		}
+		for _, subject := range addedHTTP {
+			m.doRemoveOutboundSubscription(outbound, subject)
+		}
+		m.logger.Warn("rule update aborted; previous rule state preserved",
+			"key", key, "revision", revision)
+		return
+	}
+
+	m.mu.Lock()
+	m.currentRules[key] = rules
+	m.pushRulesToProcessor()
 
 	stillNeededNATS := make(map[string]bool)
 	stillNeededHTTP := make(map[string]bool)
@@ -179,33 +238,11 @@ func (m *RuleKVManager) handleRulePut(key string, value []byte, revision uint64)
 			stillNeededHTTP[subject] = true
 		}
 	}
-
 	m.mu.Unlock()
-
-	for subject := range newNATSSubjects {
-		if !previousNATSSubjects[subject] {
-			if err := m.broker.AddAndStartSubscription(subject); err != nil {
-				if errors.Is(err, ErrNoStreamFound) {
-					m.logger.Warn("rule references subject with no JetStream stream, skipping subscription",
-						"key", key, "subject", subject,
-						"hint", "create a stream covering this subject or remove the rule")
-				} else {
-					m.logger.Error("failed to start subscription for new subject",
-						"key", key, "subject", subject, "error", err)
-				}
-			}
-		}
-	}
-
-	for subject := range newHTTPSubjects {
-		if !previousHTTPSubjects[subject] {
-			m.doAddOutboundSubscription(outbound, subject)
-		}
-	}
 
 	for subject := range previousNATSSubjects {
 		if !stillNeededNATS[subject] {
-			m.broker.RemoveSubscription(subject)
+			m.subscriber.RemoveSubscription(subject)
 		}
 	}
 	for subject := range previousHTTPSubjects {
@@ -248,7 +285,7 @@ func (m *RuleKVManager) handleRuleDelete(key string) {
 
 	for subject := range oldNATSSubjects {
 		if !stillNeededNATS[subject] {
-			m.broker.RemoveSubscription(subject)
+			m.subscriber.RemoveSubscription(subject)
 		}
 	}
 
@@ -303,11 +340,19 @@ func (m *RuleKVManager) SetOutboundSubscriber(sub OutboundSubscriber) {
 	m.mu.Unlock()
 
 	for _, subject := range httpSubjects {
-		m.doAddOutboundSubscription(sub, subject)
+		if err := m.doAddOutboundSubscription(sub, subject); err != nil {
+			m.logger.Error("failed to register deferred outbound subscription",
+				"subject", subject, "error", err)
+		}
 	}
 }
 
-func (m *RuleKVManager) doAddOutboundSubscription(sub OutboundSubscriber, subject string) {
+// doAddOutboundSubscription registers an HTTP-action subject with the outbound
+// subscriber. Returns nil when the subscriber is unset (deferred registration
+// path — SetOutboundSubscriber will pick the subject up retroactively); returns
+// an error when the consumer creation or subscription registration fails so
+// that callers can roll back a partially-applied rule update.
+func (m *RuleKVManager) doAddOutboundSubscription(sub OutboundSubscriber, subject string) error {
 	if sub == nil {
 		m.mu.Lock()
 		wasSet := m.outboundSet
@@ -319,20 +364,22 @@ func (m *RuleKVManager) doAddOutboundSubscription(sub OutboundSubscriber, subjec
 			m.logger.Debug("HTTP action rule deferred until outbound subscriber set",
 				"subject", subject)
 		}
-		return
+		return nil
 	}
 
 	streamName, consumerName, err := m.broker.CreateOutboundConsumer(subject)
 	if err != nil {
-		m.logger.Error("failed to create outbound consumer",
-			"subject", subject, "error", err)
-		return
+		return fmt.Errorf("create outbound consumer for %q: %w", subject, err)
 	}
 
 	if err := sub.AddOutboundSubscription(m.broker.ctx, streamName, consumerName, subject); err != nil {
-		m.logger.Error("failed to add outbound subscription",
-			"subject", subject, "error", err)
+		if delErr := m.broker.jetStream.DeleteConsumer(m.broker.ctx, streamName, consumerName); delErr != nil && !errors.Is(delErr, jetstream.ErrConsumerNotFound) {
+			m.logger.Warn("failed to delete orphaned outbound consumer; manual cleanup required",
+				"subject", subject, "stream", streamName, "consumer", consumerName, "error", delErr)
+		}
+		return fmt.Errorf("register outbound subscription for %q: %w", subject, err)
 	}
+	return nil
 }
 
 func (m *RuleKVManager) doRemoveOutboundSubscription(sub OutboundSubscriber, subject string) {

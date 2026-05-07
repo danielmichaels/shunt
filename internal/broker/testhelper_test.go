@@ -50,6 +50,14 @@ func newFullBroker(t *testing.T, nc *nats.Conn, js jetstream.JetStream, processo
 	return b
 }
 
+// noopSubscriber satisfies subscriptionController without touching JetStream.
+// Use this in tests that exercise rule-loading and outbound-registration logic
+// independently of the broker's NATS subscription mechanics.
+type noopSubscriber struct{}
+
+func (noopSubscriber) AddAndStartSubscription(string) error { return nil }
+func (noopSubscriber) RemoveSubscription(string)            {}
+
 func consumerExists(t *testing.T, js jetstream.JetStream, stream, consumer string) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

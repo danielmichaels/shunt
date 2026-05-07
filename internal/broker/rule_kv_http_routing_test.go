@@ -218,6 +218,7 @@ func TestNATSRuleFromKV_StillRoutesAfterRefactor(t *testing.T) {
 	rulesLoader := rule.NewRulesLoader(log, nil)
 
 	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+	kvManager.subscriber = noopSubscriber{}
 	require.NoError(t, kvManager.Watch(ctx))
 
 	readyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -300,6 +301,7 @@ func TestHTTPActionRule_RegistersWithOutboundClient(t *testing.T) {
 	outbound := newTestOutboundClient(t, js, processor)
 
 	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+	kvManager.subscriber = noopSubscriber{}
 	kvManager.SetOutboundSubscriber(outbound)
 
 	require.NoError(t, kvManager.Watch(ctx))
@@ -347,6 +349,7 @@ func TestNATSOnlyRule_NoOutboundSubscription(t *testing.T) {
 	outbound := newTestOutboundClient(t, js, processor)
 
 	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+	kvManager.subscriber = noopSubscriber{}
 	kvManager.SetOutboundSubscriber(outbound)
 
 	require.NoError(t, kvManager.Watch(ctx))
@@ -388,6 +391,7 @@ func TestSetOutboundSubscriber_RetroactiveRegistration(t *testing.T) {
 	rulesLoader := rule.NewRulesLoader(log, nil)
 
 	kvManager := NewRuleKVManager("rules", false, processor, natsBroker, rulesLoader, log)
+	kvManager.subscriber = noopSubscriber{}
 
 	require.NoError(t, kvManager.Watch(ctx))
 
