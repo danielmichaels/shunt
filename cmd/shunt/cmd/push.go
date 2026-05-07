@@ -15,6 +15,7 @@ import (
 
 type KVPushCmd struct {
 	Path string `arg:"" help:"File or directory to push" type:"existingpath"`
+	Key  string `help:"Override KV key for a single file push"`
 }
 
 func (p *KVPushCmd) Run(kv *KVCmd, globals *Globals) error {
@@ -34,6 +35,9 @@ func (p *KVPushCmd) Run(kv *KVCmd, globals *Globals) error {
 
 	var files []string
 	if info.IsDir() {
+		if p.Key != "" {
+			return fmt.Errorf("--key can only be used when pushing a single file")
+		}
 		entries, err := filepath.Glob(filepath.Join(p.Path, "*.yaml"))
 		if err != nil {
 			return fmt.Errorf("failed to glob directory: %w", err)
@@ -98,7 +102,10 @@ func (p *KVPushCmd) Run(kv *KVCmd, globals *Globals) error {
 			return fmt.Errorf("stream validation failed for %s:\n  %s", f, strings.Join(msgs, "\n  "))
 		}
 
-		key := deriveKVKey(f, kv.Bucket)
+		key := p.Key
+		if key == "" {
+			key = deriveKVKey(p.Path, f, kv.Bucket, info.IsDir())
+		}
 		if _, err := bucket.Put(ctx, key, data); err != nil {
 			return fmt.Errorf("failed to put key '%s': %w", key, err)
 		}

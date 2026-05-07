@@ -390,7 +390,7 @@ When `shunt kv push` uploads a file, the file path determines the KV key:
 
 1. Strip the `.yaml` or `.yml` extension
 2. Replace path separators (`/`, `\`) with `.`
-3. Strip the bucket name prefix (default: `rules.`)
+3. Strip path segments up to and including the bucket directory name when present (default: `rules`)
 
 Examples:
 
@@ -399,8 +399,15 @@ Examples:
 | `routing.yaml` | `routing` |
 | `sensors/tank.yaml` | `sensors.tank` |
 | `alerts/critical.yaml` | `alerts.critical` |
+| `/repo/shunt/rules/router/basic.yaml` | `router.basic` |
 
 This means your directory structure maps directly to a dotted namespace in the KV store.
+
+If you need an explicit key, use `--key` when pushing a single file:
+
+```bash
+shunt kv push ~/projects/example-app/shunt/rules/basic-notify.yaml --key basic-notify --nats-url $NATS_URL
+```
 
 ### Directory Push Behavior
 
