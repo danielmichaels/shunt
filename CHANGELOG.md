@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-05-07
+
+### 🐛 Bug Fixes
+
+- *(kv)* Derive push keys from rules namespace and add explicit key override([1a587d3](https://github.com/danielmichaels/shunt/commit/1a587d3980b763c7d5f2fcf5769960d0ab00200c))
+- *(broker)* Drain consumers and roll back failed updates([b859edf](https://github.com/danielmichaels/shunt/commit/b859edfd3f4542e374239f7b36d8f2896caefd5b))
+- *(broker)* Delete leaked JetStream consumers on rule subject change([51009e0](https://github.com/danielmichaels/shunt/commit/51009e04c77e9ae2be0d7cc56c2b2d0a682adce7))
+- Fix jetstream to use tempdir in test([fbf29d1](https://github.com/danielmichaels/shunt/commit/fbf29d1a09aa93d3212b35b859a81492ba45a4f6))
+- Only send analytics when live([328c0c5](https://github.com/danielmichaels/shunt/commit/328c0c5e3a5705b92582ff2348cae7b8f244c60e))
+- Check now allows --headers (#37)([1935489](https://github.com/danielmichaels/shunt/commit/193548925bddb097bd11b6d83e287cc442f6207c))
+
+### 📚 Documentation
+
+- Add tapes to docs and kv soldiers 5 (#38)([61b4c3d](https://github.com/danielmichaels/shunt/commit/61b4c3d7d39b2bb38ef8c41589fb7da02d450afa))
+- Add CNAME (#36)([0c411f0](https://github.com/danielmichaels/shunt/commit/0c411f06046dd4ad8470436fe453bb73baadd058))
+- Add mkdocs site (#35)([c47fd5e](https://github.com/danielmichaels/shunt/commit/c47fd5e98fae579e3449093fb5290f9fe6ca562e))
 ## [0.1.2] - 2026-04-23
 
 ### 🐛 Bug Fixes
