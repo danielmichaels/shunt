@@ -79,6 +79,10 @@ type Subscription struct {
 	cancel       context.CancelFunc
 	logger       *slog.Logger
 	consumerCfg  *config.ConsumerConfig
+	// workersWG drains in-flight workers during RemoveSubscription so the
+	// caller can safely delete the durable consumer afterwards without
+	// racing in-flight Ack/Nak calls.
+	workersWG sync.WaitGroup
 }
 
 // NewSubscriptionManager creates a new subscription manager.
@@ -165,11 +169,21 @@ func (sm *SubscriptionManager) AddAndStartSubscription(ctx context.Context, stre
 	sub := sm.subscriptions[subject]
 	sm.mu.RUnlock()
 
-	return sm.startSubscription(ctx, sub)
+	if err := sm.startSubscription(ctx, sub); err != nil {
+		sm.mu.Lock()
+		delete(sm.subscriptions, subject)
+		sm.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
-// RemoveSubscription stops and removes a subscription by subject.
-// Stops the iterator and cancels the context so workers drain naturally.
+// RemoveSubscription stops a subscription and waits for in-flight workers to
+// finish before returning. Blocking the caller is intentional: the caller
+// (NATSBroker.RemoveSubscription) will run DeleteConsumer next, and we must
+// not race in-flight Ack/Nak calls against the consumer disappearing — that
+// race causes duplicate deliveries when the durable consumer is later
+// recreated with the same name.
 func (sm *SubscriptionManager) RemoveSubscription(subject string) {
 	sm.mu.Lock()
 	sub, exists := sm.subscriptions[subject]
@@ -186,6 +200,8 @@ func (sm *SubscriptionManager) RemoveSubscription(subject string) {
 	if sub.cancel != nil {
 		sub.cancel()
 	}
+
+	sub.workersWG.Wait()
 
 	sm.logger.Debug("subscription removed", "subject", subject)
 }
@@ -248,6 +264,7 @@ func (sm *SubscriptionManager) startSubscription(ctx context.Context, sub *Subsc
 
 	for i := 0; i < sub.Workers; i++ {
 		sm.wg.Add(1)
+		sub.workersWG.Add(1)
 		go sm.messageWorker(subCtx, sub, i)
 	}
 
@@ -263,6 +280,7 @@ func (sm *SubscriptionManager) startSubscription(ctx context.Context, sub *Subsc
 // that leverages JetStream's internal optimizations.
 func (sm *SubscriptionManager) messageWorker(ctx context.Context, sub *Subscription, workerID int) {
 	defer sm.wg.Done()
+	defer sub.workersWG.Done()
 
 	sm.logger.Debug("message worker started",
 		"subject", sub.Subject,

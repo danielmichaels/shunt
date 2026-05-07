@@ -2,13 +2,16 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/danielmichaels/shunt/config"
 	"github.com/danielmichaels/shunt/internal/logger"
+	"github.com/danielmichaels/shunt/internal/rule"
 	"github.com/danielmichaels/shunt/internal/testutil"
 )
 
@@ -31,9 +34,45 @@ func newMinimalBroker(t *testing.T, js jetstream.JetStream) *NATSBroker {
 		logger:         log,
 		jetStream:      js,
 		kvStores:       make(map[string]jetstream.KeyValue),
-		consumers:      make(map[string]string),
+		consumers:      make(map[string]consumerRef),
 		streamResolver: NewStreamResolver(js, log),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
+}
+
+func newFullBroker(t *testing.T, nc *nats.Conn, js jetstream.JetStream, processor *rule.Processor) *NATSBroker {
+	t.Helper()
+	b := newMinimalBroker(t, js)
+	b.natsConn = nc
+	b.InitializeSubscriptionManager(processor)
+	t.Cleanup(func() { _ = b.subscriptionMgr.Stop() })
+	return b
+}
+
+// noopSubscriber satisfies subscriptionController without touching JetStream.
+// Use this in tests that exercise rule-loading and outbound-registration logic
+// independently of the broker's NATS subscription mechanics.
+type noopSubscriber struct{}
+
+func (noopSubscriber) AddAndStartSubscription(string) error { return nil }
+func (noopSubscriber) RemoveSubscription(string)            {}
+
+func consumerExists(t *testing.T, js jetstream.JetStream, stream, consumer string) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s, err := js.Stream(ctx, stream)
+	if err != nil {
+		t.Logf("consumerExists: stream lookup error (treating as absent): %v", err)
+		return false
+	}
+	_, err = s.Consumer(ctx, consumer)
+	if err == nil {
+		return true
+	}
+	if !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		t.Logf("consumerExists: consumer lookup error (treating as absent): %v", err)
+	}
+	return false
 }
