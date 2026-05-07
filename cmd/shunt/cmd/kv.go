@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -144,15 +146,81 @@ func spinStop(s *spinner.Spinner) {
 	}
 }
 
-func sanitizeKVKey(filename string) string {
-	key := strings.TrimSuffix(filename, ".yaml")
-	key = strings.TrimSuffix(key, ".yml")
-	key = strings.ReplaceAll(key, "/", ".")
-	key = strings.ReplaceAll(key, "\\", ".")
-	return key
+func trimYAMLExt(path string) string {
+	path = strings.TrimSuffix(path, ".yaml")
+	path = strings.TrimSuffix(path, ".yml")
+	return path
 }
 
-func deriveKVKey(filePath, bucket string) string {
-	key := sanitizeKVKey(filePath)
-	return strings.TrimPrefix(key, bucket+".")
+func kvPathSegments(filePath string) []string {
+	normalized := strings.ReplaceAll(filePath, "\\", "/")
+	normalized = path.Clean(normalized)
+	normalized = trimYAMLExt(normalized)
+
+	parts := strings.Split(normalized, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			continue
+		}
+		segments = append(segments, part)
+	}
+	return segments
+}
+
+func isAbsoluteKVPath(filePath string) bool {
+	if filepath.IsAbs(filePath) {
+		return true
+	}
+	if len(filePath) >= 3 && filePath[1] == ':' && (filePath[2] == '/' || filePath[2] == '\\') {
+		return true
+	}
+	return false
+}
+
+func deriveKVKeyFromBucketPath(filePath, bucket string) (string, bool) {
+	segments := kvPathSegments(filePath)
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i] != bucket {
+			continue
+		}
+		key := strings.Join(segments[i+1:], ".")
+		if key == "" {
+			return "", false
+		}
+		return key, true
+	}
+	return "", false
+}
+
+func deriveKVKey(pushPath, filePath, bucket string, pushIsDir bool) string {
+	if key, ok := deriveKVKeyFromBucketPath(filePath, bucket); ok {
+		return key
+	}
+
+	if !isAbsoluteKVPath(filePath) {
+		return strings.Join(kvPathSegments(filePath), ".")
+	}
+
+	fileSegments := kvPathSegments(filePath)
+	if len(fileSegments) == 0 {
+		return ""
+	}
+	fileKey := fileSegments[len(fileSegments)-1]
+
+	if !pushIsDir {
+		return fileKey
+	}
+
+	pushSegments := kvPathSegments(pushPath)
+	if len(pushSegments) == 0 {
+		return fileKey
+	}
+
+	dirKey := pushSegments[len(pushSegments)-1]
+	if dirKey == "" || dirKey == fileKey {
+		return fileKey
+	}
+
+	return dirKey + "." + fileKey
 }
